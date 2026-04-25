@@ -23,6 +23,7 @@ function authHeaders(session: AuthSession | null) {
   return {
     Authorization: `Bearer ${session.accessToken}`,
     'X-Current-Email': session.email,
+    ...(session.dbUserId ? { 'X-Current-User-Id': String(session.dbUserId) } : {}),
   };
 }
 

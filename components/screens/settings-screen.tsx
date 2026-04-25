@@ -253,6 +253,7 @@ export function SettingsScreenContent() {
                 </View>
               </View>
               <Text style={styles.profileId}>ユーザーID: {savedProfile.userId || '未設定'}</Text>
+              <Text style={styles.profileDbId}>DB ID: {authSession?.dbUserId ?? '未取得'}</Text>
               <Text style={styles.profileNote}>{savedProfile.note || '一言はまだ設定されていません'}</Text>
             </View>
           </AppCard>
@@ -411,6 +412,7 @@ const styles = StyleSheet.create({
   planBadgeText: { fontSize: 12, fontWeight: '900', color: '#6c7a90' },
   planBadgeTextPremium: { color: '#b7791f' },
   profileId: { fontSize: 14, fontWeight: '700', color: '#1f6fff' },
+  profileDbId: { fontSize: 12, fontWeight: '700', color: '#8a97ab' },
   profileNote: { fontSize: 13, lineHeight: 19, color: '#6c7a90' },
   formCard: { padding: 18, gap: 14 },
   cardTitle: { fontSize: 18, fontWeight: '900', color: '#152033' },

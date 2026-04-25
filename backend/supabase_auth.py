@@ -136,6 +136,7 @@ def _session_from_response(
     return AuthSession(
         email=email or fallback_email,
         access_token=data.get("access_token") or fallback_token,
+        db_user_id=int(app_user["id"]) if app_user and app_user.get("id") is not None else None,
         username=app_user.get("name") if app_user else None,
         public_user_id=app_user.get("user_id") if app_user else None,
         note=app_user.get("note") if app_user else None,

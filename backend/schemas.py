@@ -78,6 +78,7 @@ class AuthProfileUpdate(BaseModel):
 class AuthSession(BaseModel):
     email: str = Field(..., description="ログイン中のメールアドレス")
     access_token: str | None = Field(default=None, description="Supabase Auth のアクセストークン")
+    db_user_id: int | None = Field(default=None, description="User テーブル上のID")
     username: str | None = Field(default=None, description="表示用ユーザ名")
     public_user_id: str | None = Field(default=None, description="公開ユーザーID")
     note: str | None = Field(default=None, description="ひとこと")

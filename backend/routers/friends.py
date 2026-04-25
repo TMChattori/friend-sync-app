@@ -21,8 +21,14 @@ def _get_bearer_token(authorization: str | None) -> str:
     return authorization[7:].strip()
 
 
-def _get_owner_user_id(authorization: str | None, current_email: str | None) -> int:
+def _get_owner_user_id(authorization: str | None, current_email: str | None, current_user_id: str | None) -> int:
     _get_bearer_token(authorization)
+
+    if current_user_id:
+        try:
+            return int(current_user_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current user id is invalid") from exc
 
     if not current_email:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current email is required")
@@ -41,8 +47,9 @@ def _get_owner_user_id(authorization: str | None, current_email: str | None) -> 
 def get_friends(
     authorization: str | None = Header(default=None),
     x_current_email: str | None = Header(default=None),
+    x_current_user_id: str | None = Header(default=None),
 ) -> list[Friend]:
-    owner_user_id = _get_owner_user_id(authorization, x_current_email)
+    owner_user_id = _get_owner_user_id(authorization, x_current_email, x_current_user_id)
 
     try:
         return list_friends(owner_user_id)
@@ -57,8 +64,9 @@ def search_friends(
     name: str,
     authorization: str | None = Header(default=None),
     x_current_email: str | None = Header(default=None),
+    x_current_user_id: str | None = Header(default=None),
 ) -> list[FriendCandidate]:
-    owner_user_id = _get_owner_user_id(authorization, x_current_email)
+    owner_user_id = _get_owner_user_id(authorization, x_current_email, x_current_user_id)
 
     try:
         return search_friend_candidates(name, owner_user_id)
@@ -73,8 +81,9 @@ def get_friend_by_public_id(
     public_user_id: str,
     authorization: str | None = Header(default=None),
     x_current_email: str | None = Header(default=None),
+    x_current_user_id: str | None = Header(default=None),
 ) -> FriendCandidate:
-    owner_user_id = _get_owner_user_id(authorization, x_current_email)
+    owner_user_id = _get_owner_user_id(authorization, x_current_email, x_current_user_id)
 
     try:
         candidate = find_friend_candidate_by_public_user_id(public_user_id, owner_user_id)
@@ -93,8 +102,9 @@ def post_friend(
     payload: FriendCreate,
     authorization: str | None = Header(default=None),
     x_current_email: str | None = Header(default=None),
+    x_current_user_id: str | None = Header(default=None),
 ) -> Friend:
-    owner_user_id = _get_owner_user_id(authorization, x_current_email)
+    owner_user_id = _get_owner_user_id(authorization, x_current_email, x_current_user_id)
 
     try:
         return create_friend(payload, owner_user_id)
@@ -109,8 +119,9 @@ def remove_friend(
     friend_id: int,
     authorization: str | None = Header(default=None),
     x_current_email: str | None = Header(default=None),
+    x_current_user_id: str | None = Header(default=None),
 ) -> Friend:
-    owner_user_id = _get_owner_user_id(authorization, x_current_email)
+    owner_user_id = _get_owner_user_id(authorization, x_current_email, x_current_user_id)
 
     try:
         friend = delete_friend(friend_id, owner_user_id)
