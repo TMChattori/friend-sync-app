@@ -165,7 +165,12 @@ def ensure_app_user(email: str, username: str | None = None) -> dict:
         f"User?select=id,name,user_id,note,icon_url,mailadress,plan_status&mailadress=eq.{encoded_email}&limit=1",
     )
     if existing_rows:
-        return existing_rows[0]
+        existing_user = existing_rows[0]
+        display_name = _build_default_name(email, username) if username else None
+        if display_name and existing_user.get("name") != display_name:
+            rows = _db_request("PATCH", f"User?id=eq.{existing_user['id']}", {"name": display_name})
+            return rows[0] if rows else existing_user
+        return existing_user
 
     rows = _db_request(
         "POST",
@@ -178,6 +183,14 @@ def ensure_app_user(email: str, username: str | None = None) -> dict:
         },
     )
     return rows[0]
+
+
+def get_app_user_profile(access_token: str, current_email: str) -> AuthSession:
+    if not current_email:
+        raise SupabaseRequestError(400, "current email is required")
+
+    app_user = ensure_app_user(current_email)
+    return _session_from_response({}, current_email, access_token, app_user)
 
 
 def sync_app_user_email(current_email: str, new_email: str) -> None:

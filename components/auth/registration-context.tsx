@@ -1,4 +1,4 @@
-import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
 import { type AuthSession } from '@/services/auth-api';
 
@@ -103,15 +103,31 @@ export function RegistrationProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const persistSession = async (session: AuthSession) => {
+  const persistSession = useCallback(async (session: AuthSession) => {
     setAuthSession(session);
     await setStoredSession(session);
-  };
+  }, []);
 
-  const clearSession = async () => {
+  const clearSession = useCallback(async () => {
     setAuthSession(null);
     await removeStoredSession();
-  };
+  }, []);
+
+  const updateSession = useCallback(
+    (sessionOrUpdater: AuthSession | ((current: AuthSession | null) => AuthSession | null)) => {
+      setAuthSession((current) => {
+        const nextSession = typeof sessionOrUpdater === 'function' ? sessionOrUpdater(current) : sessionOrUpdater;
+
+        if (nextSession) {
+          void setStoredSession(nextSession);
+          return nextSession;
+        }
+
+        return current;
+      });
+    },
+    []
+  );
 
   const value = useMemo(
     () => ({
@@ -121,19 +137,12 @@ export function RegistrationProvider({ children }: { children: ReactNode }) {
       completeRegistration: (session: AuthSession) => {
         void persistSession(session);
       },
-      updateAuthSession: (sessionOrUpdater: AuthSession | ((current: AuthSession | null) => AuthSession | null)) => {
-        const nextSession =
-          typeof sessionOrUpdater === 'function' ? sessionOrUpdater(authSession) : sessionOrUpdater;
-
-        if (nextSession) {
-          void persistSession(nextSession);
-        }
-      },
+      updateAuthSession: updateSession,
       clearRegistration: () => {
         void clearSession();
       },
     }),
-    [authSession, isReady]
+    [authSession, clearSession, isReady, persistSession, updateSession]
   );
 
   return <RegistrationContext.Provider value={value}>{children}</RegistrationContext.Provider>;

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
@@ -7,7 +8,7 @@ import { useRegistration } from '@/components/auth/registration-context';
 import { AppCard } from '@/components/common/app-card';
 import { ScreenHeader } from '@/components/common/screen-header';
 import { getCurrentUserProfile } from '@/data/mock-data';
-import { updateAppUserProfile, updateAuthProfile, uploadProfileIcon } from '@/services/auth-api';
+import { fetchAppUserProfile, updateAppUserProfile, updateAuthProfile, uploadProfileIcon } from '@/services/auth-api';
 
 type PlanStatus = 'free' | 'premium';
 
@@ -42,6 +43,8 @@ export function SettingsScreenContent() {
   const [draftPasswordConfirmation, setDraftPasswordConfirmation] = useState('');
   const [isAuthUpdating, setIsAuthUpdating] = useState(false);
   const [isProfileUpdating, setIsProfileUpdating] = useState(false);
+  const accessToken = authSession?.accessToken;
+  const sessionEmail = authSession?.email;
 
   useEffect(() => {
     setSavedProfile(initialProfile);
@@ -53,6 +56,39 @@ export function SettingsScreenContent() {
       icon: initialProfile.icon,
     }));
   }, [initialProfile]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!accessToken || !sessionEmail) {
+        return;
+      }
+
+      const activeAccessToken = accessToken;
+      const activeEmail = sessionEmail;
+      let isActive = true;
+
+      async function syncProfile() {
+        try {
+          const latestSession = await fetchAppUserProfile({
+            accessToken: activeAccessToken,
+            currentEmail: activeEmail,
+          });
+
+          if (isActive) {
+            updateAuthSession(latestSession);
+          }
+        } catch {
+          // 古いセッションや未デプロイ時は、画面上の再ログイン導線で復旧します。
+        }
+      }
+
+      void syncProfile();
+
+      return () => {
+        isActive = false;
+      };
+    }, [accessToken, sessionEmail, updateAuthSession])
+  );
 
   const updateProfile = (key: keyof typeof draftProfile, value: string) => {
     setDraftProfile((current) => ({ ...current, [key]: value }));

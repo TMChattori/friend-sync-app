@@ -138,6 +138,24 @@ export async function updateAuthProfile({
   return mapSession(session);
 }
 
+export async function fetchAppUserProfile({
+  accessToken,
+  currentEmail,
+}: {
+  accessToken: string;
+  currentEmail: string;
+}) {
+  const session = await request<ApiAuthSession>('/auth/profile', {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'X-Current-Email': currentEmail,
+    },
+  });
+
+  return mapSession(session);
+}
+
 export async function updateAppUserProfile({
   accessToken,
   currentEmail,
