@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
+import { useRouter } from 'expo-router';
 import { useRegistration } from '@/components/auth/registration-context';
 import { AppCard } from '@/components/common/app-card';
 import { ScreenHeader } from '@/components/common/screen-header';
@@ -20,7 +21,8 @@ function shouldUploadIcon(iconUri: string, currentIconUrl?: string | null) {
 }
 
 export function SettingsScreenContent() {
-  const { authSession, updateAuthSession } = useRegistration();
+  const router = useRouter();
+  const { authSession, updateAuthSession, clearRegistration } = useRegistration();
   const fallbackProfile = useMemo(() => getCurrentUserProfile(), []);
   const initialProfile = useMemo(
     () => ({
@@ -189,6 +191,11 @@ export function SettingsScreenContent() {
     }
   };
 
+  const handleRelogin = () => {
+    clearRegistration();
+    router.replace('/register');
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -251,6 +258,9 @@ export function SettingsScreenContent() {
                 <Text style={styles.updateButtonText}>{isAuthUpdating ? '更新中...' : '更新'}</Text>
               </Pressable>
             </View>
+            <Pressable onPress={handleRelogin} style={styles.reloginButton}>
+              <Text style={styles.reloginButtonText}>再ログインする</Text>
+            </Pressable>
           </AppCard>
 
           <AppCard style={styles.formCard}>
@@ -419,4 +429,12 @@ const styles = StyleSheet.create({
   updateButton: { paddingVertical: 11, paddingHorizontal: 18, borderRadius: 999, backgroundColor: '#1f6fff' },
   updateButtonDisabled: { backgroundColor: '#aebbea' },
   updateButtonText: { color: '#ffffff', fontSize: 14, fontWeight: '800' },
+  reloginButton: {
+    minHeight: 44,
+    borderRadius: 14,
+    backgroundColor: '#eef2f7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reloginButtonText: { color: '#44536a', fontSize: 14, fontWeight: '800' },
 });

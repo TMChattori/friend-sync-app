@@ -23,6 +23,7 @@ type RegistrationContextValue = {
   authSession: AuthSession | null;
   completeRegistration: (session: AuthSession) => void;
   updateAuthSession: (session: AuthSession | ((current: AuthSession | null) => AuthSession | null)) => void;
+  clearRegistration: () => void;
 };
 
 const RegistrationContext = createContext<RegistrationContextValue | null>(null);
@@ -52,6 +53,19 @@ async function setStoredSession(session: AuthSession) {
 
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     window.localStorage.setItem(AUTH_SESSION_STORAGE_KEY, payload);
+  }
+}
+
+async function removeStoredSession() {
+  const secureStoreModule = await getSecureStoreModule();
+
+  if (secureStoreModule && typeof secureStoreModule.deleteItemAsync === 'function') {
+    await secureStoreModule.deleteItemAsync(AUTH_SESSION_STORAGE_KEY);
+    return;
+  }
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
   }
 }
 
@@ -94,6 +108,11 @@ export function RegistrationProvider({ children }: { children: ReactNode }) {
     await setStoredSession(session);
   };
 
+  const clearSession = async () => {
+    setAuthSession(null);
+    await removeStoredSession();
+  };
+
   const value = useMemo(
     () => ({
       isReady,
@@ -109,6 +128,9 @@ export function RegistrationProvider({ children }: { children: ReactNode }) {
         if (nextSession) {
           void persistSession(nextSession);
         }
+      },
+      clearRegistration: () => {
+        void clearSession();
       },
     }),
     [authSession, isReady]
