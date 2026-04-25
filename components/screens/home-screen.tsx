@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { AppButton } from '@/components/common/app-button';
 import { AppCard } from '@/components/common/app-card';
 import { ScreenHeader, SectionHeader } from '@/components/common/screen-header';
+import { useRegistration } from '@/components/auth/registration-context';
 import { DATE_OPTIONS, SELF_USER_ID, users, type Event } from '@/data/mock-data';
 import { fetchEvents } from '@/services/events-api';
 import { fetchFriends, type ApiFriend } from '@/services/friends-api';
@@ -34,6 +35,7 @@ function buildDateKey(year: number, month: number, day: number) {
 }
 
 export function HomeScreenContent() {
+  const { authSession } = useRegistration();
   const initialDateParts = parseDateParts(DATE_OPTIONS[0].key);
   const [selectedDate, setSelectedDate] = useState(DATE_OPTIONS[0].key);
   const [pickerYear, setPickerYear] = useState(initialDateParts.year);
@@ -53,7 +55,7 @@ export function HomeScreenContent() {
   const loadHomeData = useCallback(async () => {
     try {
       setIsLoading(true);
-      const [apiFriends, apiEvents] = await Promise.all([fetchFriends(), fetchEvents()]);
+      const [apiFriends, apiEvents] = await Promise.all([fetchFriends(authSession), fetchEvents()]);
       setFriends(apiFriends);
       setEvents(apiEvents);
       setLoadError(null);
@@ -62,7 +64,7 @@ export function HomeScreenContent() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [authSession]);
 
   useFocusEffect(
     useCallback(() => {

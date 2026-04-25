@@ -13,7 +13,6 @@ load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
-SELF_DB_USER_ID = int(os.getenv("SELF_DB_USER_ID", "1"))
 
 
 def _ensure_config() -> None:
@@ -52,22 +51,6 @@ def _request(method: str, path: str, json: dict | None = None) -> list[dict]:
     return data if isinstance(data, list) else [data]
 
 
-def _ensure_self_user() -> None:
-    rows = _request("GET", f"User?select=id&id=eq.{SELF_DB_USER_ID}")
-    if rows:
-        return
-
-    _request(
-        "POST",
-        "User",
-        {
-            "id": SELF_DB_USER_ID,
-            "name": "みな",
-            "user_id": "mina_0415",
-        },
-    )
-
-
 def _friend_from_relation(relation: dict, users_by_id: dict[int, dict]) -> Friend:
     friend_user_id = int(relation["friend_user_id"])
     user = users_by_id.get(friend_user_id, {})
@@ -97,25 +80,25 @@ def _candidate_from_user(row: dict) -> FriendCandidate:
     )
 
 
-def list_friends() -> list[Friend]:
+def list_friends(owner_user_id: int) -> list[Friend]:
     relations = _request(
         "GET",
-        f"Friend?select=id,owner_user_id,friend_user_id,created_at,updated_at&owner_user_id=eq.{SELF_DB_USER_ID}&order=id.asc",
+        f"Friend?select=id,owner_user_id,friend_user_id,created_at,updated_at&owner_user_id=eq.{owner_user_id}&order=id.asc",
     )
     users_by_id = _get_users_by_ids([int(row["friend_user_id"]) for row in relations])
     return [_friend_from_relation(row, users_by_id) for row in relations]
 
 
-def search_friend_candidates(name: str) -> list[FriendCandidate]:
+def search_friend_candidates(name: str, owner_user_id: int) -> list[FriendCandidate]:
     keyword = quote(name.strip(), safe="")
     rows = _request(
         "GET",
         f"User?select=id,name,user_id,note&name=eq.{keyword}&order=id.asc&limit=20",
     )
-    return [_candidate_from_user(row) for row in rows if int(row["id"]) != SELF_DB_USER_ID]
+    return [_candidate_from_user(row) for row in rows if int(row["id"]) != owner_user_id]
 
 
-def find_friend_candidate_by_public_user_id(public_user_id: str) -> FriendCandidate | None:
+def find_friend_candidate_by_public_user_id(public_user_id: str, owner_user_id: int) -> FriendCandidate | None:
     keyword = quote(public_user_id.strip(), safe="")
     rows = _request(
         "GET",
@@ -125,21 +108,20 @@ def find_friend_candidate_by_public_user_id(public_user_id: str) -> FriendCandid
         return None
 
     row = rows[0]
-    if int(row["id"]) == SELF_DB_USER_ID:
+    if int(row["id"]) == owner_user_id:
         return None
 
     return _candidate_from_user(row)
 
 
-def create_friend(payload: FriendCreate) -> Friend:
-    _ensure_self_user()
+def create_friend(payload: FriendCreate, owner_user_id: int) -> Friend:
     friend_user = None
 
     if payload.user_db_id is not None:
       user_rows = _request("GET", f"User?select=id,name,user_id,note&id=eq.{payload.user_db_id}&limit=1")
       friend_user = user_rows[0] if user_rows else None
     elif payload.public_user_id:
-      candidate = find_friend_candidate_by_public_user_id(payload.public_user_id)
+      candidate = find_friend_candidate_by_public_user_id(payload.public_user_id, owner_user_id)
       friend_user = {
           "id": candidate.id,
           "name": candidate.name,
@@ -147,7 +129,7 @@ def create_friend(payload: FriendCreate) -> Friend:
           "note": candidate.note,
       } if candidate else None
     elif payload.name:
-      candidates = search_friend_candidates(payload.name)
+      candidates = search_friend_candidates(payload.name, owner_user_id)
       if candidates:
           friend_user = {
               "id": candidates[0].id,
@@ -159,12 +141,12 @@ def create_friend(payload: FriendCreate) -> Friend:
     if not friend_user:
         raise SupabaseRequestError(404, "Friend candidate not found")
 
-    if int(friend_user["id"]) == SELF_DB_USER_ID:
+    if int(friend_user["id"]) == owner_user_id:
         raise SupabaseRequestError(400, "You cannot add yourself")
 
     existing_relations = _request(
         "GET",
-        f"Friend?select=id&owner_user_id=eq.{SELF_DB_USER_ID}&friend_user_id=eq.{friend_user['id']}&limit=1",
+        f"Friend?select=id&owner_user_id=eq.{owner_user_id}&friend_user_id=eq.{friend_user['id']}&limit=1",
     )
     if existing_relations:
         raise SupabaseRequestError(409, "Friend already added")
@@ -173,7 +155,7 @@ def create_friend(payload: FriendCreate) -> Friend:
         "POST",
         "Friend",
         {
-            "owner_user_id": SELF_DB_USER_ID,
+            "owner_user_id": owner_user_id,
             "friend_user_id": friend_user["id"],
         },
     )
@@ -181,10 +163,10 @@ def create_friend(payload: FriendCreate) -> Friend:
     return _friend_from_relation(relation_rows[0], {int(friend_user["id"]): friend_user})
 
 
-def delete_friend(friend_id: int) -> Friend | None:
+def delete_friend(friend_id: int, owner_user_id: int) -> Friend | None:
     relations = _request(
         "GET",
-        f"Friend?select=id,owner_user_id,friend_user_id,created_at,updated_at&id=eq.{friend_id}&limit=1",
+        f"Friend?select=id,owner_user_id,friend_user_id,created_at,updated_at&id=eq.{friend_id}&owner_user_id=eq.{owner_user_id}&limit=1",
     )
 
     if not relations:
@@ -193,5 +175,5 @@ def delete_friend(friend_id: int) -> Friend | None:
     relation = relations[0]
     users_by_id = _get_users_by_ids([int(relation["friend_user_id"])])
     friend = _friend_from_relation(relation, users_by_id)
-    _request("DELETE", f"Friend?id=eq.{friend_id}")
+    _request("DELETE", f"Friend?id=eq.{friend_id}&owner_user_id=eq.{owner_user_id}")
     return friend

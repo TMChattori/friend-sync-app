@@ -53,7 +53,7 @@ export function FriendsScreenContent() {
   const loadFriends = useCallback(async () => {
     try {
       setIsLoadingFriends(true);
-      const apiFriends = await fetchFriends();
+      const apiFriends = await fetchFriends(authSession);
       setFriends(apiFriends);
       setFriendsError(null);
     } catch {
@@ -61,7 +61,7 @@ export function FriendsScreenContent() {
     } finally {
       setIsLoadingFriends(false);
     }
-  }, []);
+  }, [authSession]);
 
   useFocusEffect(
     useCallback(() => {
@@ -88,7 +88,7 @@ export function FriendsScreenContent() {
         style: 'destructive',
         onPress: async () => {
           try {
-            await deleteFriend(friend.id);
+            await deleteFriend(friend.id, authSession);
             await loadFriends();
           } catch {
             Alert.alert('削除に失敗', 'サーバー接続を確認してください。');
@@ -126,7 +126,7 @@ export function FriendsScreenContent() {
     }
 
     try {
-      const candidates = await searchFriendCandidatesByName(keyword);
+      const candidates = await searchFriendCandidatesByName(keyword, authSession);
       if (candidates.length === 0) {
         Alert.alert('見つかりませんでした', '一致するユーザー名が見つかりませんでした。');
         return;
@@ -145,7 +145,7 @@ export function FriendsScreenContent() {
     }
 
     try {
-      await createFriendByDbId(foundFriend.id);
+      await createFriendByDbId(foundFriend.id, authSession);
       await loadFriends();
       setIsFoundModalVisible(false);
       setFoundFriend(null);
@@ -176,7 +176,7 @@ export function FriendsScreenContent() {
     setHasScannedQr(true);
     void (async () => {
       try {
-        const candidate = await fetchFriendCandidateByPublicUserId(publicUserId);
+        const candidate = await fetchFriendCandidateByPublicUserId(publicUserId, authSession);
         openFoundFriend(candidate);
       } catch {
         Alert.alert('見つかりませんでした', '一致するユーザーIDが見つかりませんでした。');

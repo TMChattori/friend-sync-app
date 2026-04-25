@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, status
 
 from schemas import Friend, FriendCandidate, FriendCreate
+from supabase_auth import ensure_app_user
 from supabase_events import SupabaseConfigError, SupabaseRequestError
 from supabase_friends import (
     create_friend,
@@ -13,10 +14,38 @@ from supabase_friends import (
 router = APIRouter(prefix="/friends", tags=["friends"])
 
 
-@router.get("", response_model=list[Friend])
-def get_friends() -> list[Friend]:
+def _get_bearer_token(authorization: str | None) -> str:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authorization token is required")
+
+    return authorization[7:].strip()
+
+
+def _get_owner_user_id(authorization: str | None, current_email: str | None) -> int:
+    _get_bearer_token(authorization)
+
+    if not current_email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current email is required")
+
     try:
-        return list_friends()
+        app_user = ensure_app_user(current_email)
+    except SupabaseConfigError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+    except SupabaseRequestError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    return int(app_user["id"])
+
+
+@router.get("", response_model=list[Friend])
+def get_friends(
+    authorization: str | None = Header(default=None),
+    x_current_email: str | None = Header(default=None),
+) -> list[Friend]:
+    owner_user_id = _get_owner_user_id(authorization, x_current_email)
+
+    try:
+        return list_friends(owner_user_id)
     except SupabaseConfigError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     except SupabaseRequestError as exc:
@@ -24,9 +53,15 @@ def get_friends() -> list[Friend]:
 
 
 @router.get("/search", response_model=list[FriendCandidate])
-def search_friends(name: str) -> list[FriendCandidate]:
+def search_friends(
+    name: str,
+    authorization: str | None = Header(default=None),
+    x_current_email: str | None = Header(default=None),
+) -> list[FriendCandidate]:
+    owner_user_id = _get_owner_user_id(authorization, x_current_email)
+
     try:
-        return search_friend_candidates(name)
+        return search_friend_candidates(name, owner_user_id)
     except SupabaseConfigError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     except SupabaseRequestError as exc:
@@ -34,9 +69,15 @@ def search_friends(name: str) -> list[FriendCandidate]:
 
 
 @router.get("/by-public-id/{public_user_id}", response_model=FriendCandidate)
-def get_friend_by_public_id(public_user_id: str) -> FriendCandidate:
+def get_friend_by_public_id(
+    public_user_id: str,
+    authorization: str | None = Header(default=None),
+    x_current_email: str | None = Header(default=None),
+) -> FriendCandidate:
+    owner_user_id = _get_owner_user_id(authorization, x_current_email)
+
     try:
-        candidate = find_friend_candidate_by_public_user_id(public_user_id)
+        candidate = find_friend_candidate_by_public_user_id(public_user_id, owner_user_id)
     except SupabaseConfigError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     except SupabaseRequestError as exc:
@@ -48,9 +89,15 @@ def get_friend_by_public_id(public_user_id: str) -> FriendCandidate:
 
 
 @router.post("", response_model=Friend, status_code=status.HTTP_201_CREATED)
-def post_friend(payload: FriendCreate) -> Friend:
+def post_friend(
+    payload: FriendCreate,
+    authorization: str | None = Header(default=None),
+    x_current_email: str | None = Header(default=None),
+) -> Friend:
+    owner_user_id = _get_owner_user_id(authorization, x_current_email)
+
     try:
-        return create_friend(payload)
+        return create_friend(payload, owner_user_id)
     except SupabaseConfigError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     except SupabaseRequestError as exc:
@@ -58,9 +105,15 @@ def post_friend(payload: FriendCreate) -> Friend:
 
 
 @router.delete("/{friend_id}", response_model=Friend)
-def remove_friend(friend_id: int) -> Friend:
+def remove_friend(
+    friend_id: int,
+    authorization: str | None = Header(default=None),
+    x_current_email: str | None = Header(default=None),
+) -> Friend:
+    owner_user_id = _get_owner_user_id(authorization, x_current_email)
+
     try:
-        friend = delete_friend(friend_id)
+        friend = delete_friend(friend_id, owner_user_id)
     except SupabaseConfigError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     except SupabaseRequestError as exc:

@@ -126,7 +126,6 @@ Render の `Environment` セクションで、以下を設定します。
 ### 必要に応じて
 
 - `SUPABASE_SERVICE_ROLE_KEY`
-- `SELF_DB_USER_ID`
 
 例:
 
@@ -134,14 +133,8 @@ Render の `Environment` セクションで、以下を設定します。
 SUPABASE_URL=https://your-project-id.supabase.co
 SUPABASE_KEY=your-supabase-key
 SUPABASE_SERVICE_ROLE_KEY=
-SELF_DB_USER_ID=1
 SUPABASE_STORAGE_BUCKET=profile-icons
 ```
-
-補足:
-
-- `SELF_DB_USER_ID` は今の MVP 実装で使っている固定ユーザーIDです
-- 将来的にはログインユーザー連動にして、この変数は不要にするのが理想です
 
 ---
 
@@ -300,7 +293,7 @@ uvicorn main:app --host 0.0.0.0 --port $PORT
   - `SUPABASE_URL`
   - `SUPABASE_KEY`
   - `SUPABASE_SERVICE_ROLE_KEY`
-  - `SELF_DB_USER_ID`
+  - `SUPABASE_STORAGE_BUCKET`
 
 ### Expo 側
 
@@ -315,7 +308,6 @@ EXPO_PUBLIC_API_URL=https://your-render-service.onrender.com
 Render デプロイの次にやると良いもの:
 
 - `render.yaml` を作って設定をコード管理する
-- `SELF_DB_USER_ID` を廃止してログインユーザー連動にする
 - 本番 / 開発 / ステージングを分ける
 - CORS を本番向けに整理する
 
