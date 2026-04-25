@@ -6,7 +6,7 @@ import { useRegistration } from '@/components/auth/registration-context';
 import { AppCard } from '@/components/common/app-card';
 import { ScreenHeader } from '@/components/common/screen-header';
 import { getCurrentUserProfile } from '@/data/mock-data';
-import { updateAuthProfile } from '@/services/auth-api';
+import { updateAppUserProfile, updateAuthProfile } from '@/services/auth-api';
 
 type PlanStatus = 'free' | 'premium';
 
@@ -23,8 +23,10 @@ export function SettingsScreenContent() {
       ...fallbackProfile,
       name: authSession?.username || fallbackProfile.name,
       userId: authSession?.publicUserId || fallbackProfile.userId,
+      note: authSession?.note || fallbackProfile.note,
+      icon: authSession?.iconUrl || fallbackProfile.icon,
     }),
-    [authSession?.publicUserId, authSession?.username, fallbackProfile]
+    [authSession?.iconUrl, authSession?.note, authSession?.publicUserId, authSession?.username, fallbackProfile]
   );
   const [savedProfile, setSavedProfile] = useState(initialProfile);
   const [draftProfile, setDraftProfile] = useState(initialProfile);
@@ -33,6 +35,7 @@ export function SettingsScreenContent() {
   const [draftPassword, setDraftPassword] = useState('');
   const [draftPasswordConfirmation, setDraftPasswordConfirmation] = useState('');
   const [isAuthUpdating, setIsAuthUpdating] = useState(false);
+  const [isProfileUpdating, setIsProfileUpdating] = useState(false);
 
   useEffect(() => {
     setSavedProfile(initialProfile);
@@ -40,6 +43,8 @@ export function SettingsScreenContent() {
       ...current,
       name: initialProfile.name,
       userId: initialProfile.userId,
+      note: initialProfile.note,
+      icon: initialProfile.icon,
     }));
   }, [initialProfile]);
 
@@ -64,6 +69,59 @@ export function SettingsScreenContent() {
 
     if (!result.canceled && result.assets[0]?.uri) {
       updateProfile('icon', result.assets[0].uri);
+    }
+  };
+
+  const updateUserProfile = async () => {
+    const trimmedName = draftProfile.name.trim();
+    const trimmedUserId = draftProfile.userId.trim();
+    const trimmedNote = draftProfile.note.trim();
+
+    if (!authSession?.accessToken) {
+      Alert.alert('プロフィールを変更できません', '再度ログインしてから変更してください。');
+      return;
+    }
+
+    if (!trimmedName) {
+      Alert.alert('名前を確認してください', '名前は空にできません。');
+      return;
+    }
+
+    if (!trimmedUserId) {
+      Alert.alert('IDを確認してください', 'IDは空にできません。');
+      return;
+    }
+
+    try {
+      setIsProfileUpdating(true);
+      const updatedSession = await updateAppUserProfile({
+        accessToken: authSession.accessToken,
+        currentEmail: authSession.email,
+        username: trimmedName,
+        publicUserId: trimmedUserId,
+        note: trimmedNote || undefined,
+      });
+      updateAuthSession(updatedSession);
+      setSavedProfile((current) => ({
+        ...current,
+        name: updatedSession.username || trimmedName,
+        userId: updatedSession.publicUserId || trimmedUserId,
+        note: updatedSession.note || current.note,
+        icon: updatedSession.iconUrl || current.icon,
+      }));
+      setDraftProfile((current) => ({
+        ...current,
+        name: updatedSession.username || trimmedName,
+        userId: updatedSession.publicUserId || trimmedUserId,
+        note: updatedSession.note || current.note,
+        icon: updatedSession.iconUrl || current.icon,
+      }));
+      Alert.alert('プロフィールを更新しました', '名前、ID、一言を保存しました。');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '入力内容またはサーバー接続を確認してください。';
+      Alert.alert('プロフィールを更新できませんでした', message);
+    } finally {
+      setIsProfileUpdating(false);
     }
   };
 
@@ -188,7 +246,7 @@ export function SettingsScreenContent() {
                 </View>
                 <View style={styles.iconPickerTextBlock}>
                   <Text style={styles.iconPickerTitle}>写真フォルダから選択</Text>
-                  <Text style={styles.iconPickerHint}>選んだ画像は更新ボタンでプロフィールに反映されます。</Text>
+                  <Text style={styles.iconPickerHint}>画像の本保存はSupabase Storage連携後に対応します。</Text>
                 </View>
                 <Pressable onPress={pickProfileImage} style={styles.imagePickButton}>
                   <Text style={styles.imagePickButtonText}>選択</Text>
@@ -211,22 +269,12 @@ export function SettingsScreenContent() {
               multiline
             />
             <View style={styles.formActionRow}>
-              <Text style={styles.formHint}>入力内容は更新ボタンで反映されます。</Text>
+              <Text style={styles.formHint}>名前、ID、一言をUserテーブルに保存します。一言を空欄にしても削除しません。</Text>
               <Pressable
-                onPress={() => {
-                  setSavedProfile(draftProfile);
-                  updateAuthSession((current) =>
-                    current
-                      ? {
-                          ...current,
-                          username: draftProfile.name,
-                          publicUserId: draftProfile.userId,
-                        }
-                      : current
-                  );
-                }}
-                style={styles.updateButton}>
-                <Text style={styles.updateButtonText}>更新</Text>
+                onPress={updateUserProfile}
+                disabled={isProfileUpdating}
+                style={[styles.updateButton, isProfileUpdating && styles.updateButtonDisabled]}>
+                <Text style={styles.updateButtonText}>{isProfileUpdating ? '更新中...' : '更新'}</Text>
               </Pressable>
             </View>
           </AppCard>

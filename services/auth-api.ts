@@ -5,6 +5,8 @@ export type AuthSession = {
   accessToken: string | null;
   username?: string | null;
   publicUserId?: string | null;
+  note?: string | null;
+  iconUrl?: string | null;
   planStatus?: 'free' | 'premium' | string;
 };
 
@@ -13,6 +15,8 @@ type ApiAuthSession = {
   access_token?: string | null;
   username?: string | null;
   public_user_id?: string | null;
+  note?: string | null;
+  icon_url?: string | null;
   plan_status?: string | null;
 };
 
@@ -22,6 +26,8 @@ function mapSession(session: ApiAuthSession): AuthSession {
     accessToken: session.access_token ?? null,
     username: session.username ?? null,
     publicUserId: session.public_user_id ?? null,
+    note: session.note ?? null,
+    iconUrl: session.icon_url ?? null,
     planStatus: session.plan_status ?? 'free',
   };
 }
@@ -104,6 +110,38 @@ export async function updateAuthProfile({
     body: JSON.stringify({
       email: email || null,
       password: password || null,
+    }),
+  });
+
+  return mapSession(session);
+}
+
+export async function updateAppUserProfile({
+  accessToken,
+  currentEmail,
+  username,
+  publicUserId,
+  note,
+  iconUrl,
+}: {
+  accessToken: string;
+  currentEmail: string;
+  username?: string;
+  publicUserId?: string;
+  note?: string;
+  iconUrl?: string;
+}) {
+  const session = await request<ApiAuthSession>('/auth/profile', {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'X-Current-Email': currentEmail,
+    },
+    body: JSON.stringify({
+      username: username ?? null,
+      public_user_id: publicUserId ?? null,
+      note: note ?? null,
+      icon_url: iconUrl ?? null,
     }),
   });
 

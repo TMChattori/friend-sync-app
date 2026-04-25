@@ -6,7 +6,7 @@ import certifi
 import httpx
 from dotenv import load_dotenv
 
-from schemas import AuthCredentials, AuthSession, AuthUpdate, PasswordResetRequest
+from schemas import AuthCredentials, AuthProfileUpdate, AuthSession, AuthUpdate, PasswordResetRequest
 from supabase_events import SupabaseConfigError, SupabaseRequestError
 
 
@@ -96,6 +96,8 @@ def _session_from_response(
         access_token=data.get("access_token") or fallback_token,
         username=app_user.get("name") if app_user else None,
         public_user_id=app_user.get("user_id") if app_user else None,
+        note=app_user.get("note") if app_user else None,
+        icon_url=app_user.get("icon_url") if app_user else None,
         plan_status=app_user.get("plan_status") if app_user and app_user.get("plan_status") else "free",
     )
 
@@ -118,7 +120,7 @@ def ensure_app_user(email: str, username: str | None = None) -> dict:
     encoded_email = quote(email, safe="")
     existing_rows = _db_request(
         "GET",
-        f"User?select=id,name,user_id,mailadress,plan_status&mailadress=eq.{encoded_email}&limit=1",
+        f"User?select=id,name,user_id,note,icon_url,mailadress,plan_status&mailadress=eq.{encoded_email}&limit=1",
     )
     if existing_rows:
         return existing_rows[0]
@@ -148,6 +150,52 @@ def sync_app_user_email(current_email: str, new_email: str) -> None:
 
     user_id = rows[0]["id"]
     _db_request("PATCH", f"User?id=eq.{user_id}", {"mailadress": new_email})
+
+
+def update_app_user_profile(access_token: str, current_email: str, payload: AuthProfileUpdate) -> AuthSession:
+    if not current_email:
+        raise SupabaseRequestError(400, "current email is required")
+
+    app_user = ensure_app_user(current_email)
+    update_payload: dict[str, str] = {}
+
+    if payload.username is not None:
+        username = payload.username.strip()
+        if not username:
+            raise SupabaseRequestError(400, "name cannot be empty")
+        update_payload["name"] = username[:30]
+
+    if payload.public_user_id is not None:
+        public_user_id = payload.public_user_id.strip()
+        if not public_user_id:
+            raise SupabaseRequestError(400, "user_id cannot be empty")
+
+        encoded_public_user_id = quote(public_user_id, safe="")
+        existing_rows = _db_request(
+            "GET",
+            f"User?select=id&user_id=eq.{encoded_public_user_id}&id=neq.{app_user['id']}&limit=1",
+        )
+        if existing_rows:
+            raise SupabaseRequestError(409, "user_id already exists")
+
+        update_payload["user_id"] = public_user_id
+
+    if payload.note is not None:
+        note = payload.note.strip()
+        if note:
+            update_payload["note"] = note[:120]
+
+    if payload.icon_url is not None:
+        icon_url = payload.icon_url.strip()
+        if icon_url:
+            update_payload["icon_url"] = icon_url
+
+    if not update_payload:
+        return _session_from_response({}, current_email, access_token, app_user)
+
+    rows = _db_request("PATCH", f"User?id=eq.{app_user['id']}", update_payload)
+    updated_app_user = rows[0] if rows else ensure_app_user(current_email)
+    return _session_from_response({}, current_email, access_token, updated_app_user)
 
 
 def register_user(payload: AuthCredentials) -> AuthSession:

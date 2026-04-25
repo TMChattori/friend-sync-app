@@ -68,11 +68,20 @@ class AuthUpdate(BaseModel):
     password: str | None = Field(default=None, description="変更後のパスワード")
 
 
+class AuthProfileUpdate(BaseModel):
+    username: str | None = Field(default=None, description="表示用ユーザ名")
+    public_user_id: str | None = Field(default=None, description="公開ユーザーID")
+    note: str | None = Field(default=None, description="ひとこと")
+    icon_url: str | None = Field(default=None, description="プロフィール画像URL")
+
+
 class AuthSession(BaseModel):
     email: str = Field(..., description="ログイン中のメールアドレス")
     access_token: str | None = Field(default=None, description="Supabase Auth のアクセストークン")
     username: str | None = Field(default=None, description="表示用ユーザ名")
     public_user_id: str | None = Field(default=None, description="公開ユーザーID")
+    note: str | None = Field(default=None, description="ひとこと")
+    icon_url: str | None = Field(default=None, description="プロフィール画像URL")
     plan_status: str = Field(default="free", description="プラン状態")
 
 

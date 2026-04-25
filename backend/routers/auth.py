@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Header, HTTPException, status
 
-from schemas import AuthCredentials, AuthSession, AuthUpdate, PasswordResetRequest
-from supabase_auth import login_user, register_user, send_password_reset_email, update_user
+from schemas import AuthCredentials, AuthProfileUpdate, AuthSession, AuthUpdate, PasswordResetRequest
+from supabase_auth import login_user, register_user, send_password_reset_email, update_app_user_profile, update_user
 from supabase_events import SupabaseConfigError, SupabaseRequestError
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -51,6 +51,22 @@ def update_me(
 
     try:
         return update_user(token, payload, x_current_email or "")
+    except SupabaseConfigError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+    except SupabaseRequestError as exc:
+        raise _handle_supabase_error(exc) from exc
+
+
+@router.put("/profile", response_model=AuthSession)
+def update_profile(
+    payload: AuthProfileUpdate,
+    authorization: str | None = Header(default=None),
+    x_current_email: str | None = Header(default=None),
+) -> AuthSession:
+    token = _get_bearer_token(authorization)
+
+    try:
+        return update_app_user_profile(token, x_current_email or "", payload)
     except SupabaseConfigError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     except SupabaseRequestError as exc:
