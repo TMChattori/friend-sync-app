@@ -318,7 +318,7 @@ Render デプロイの次にやると良いもの:
 設定画面では `User` テーブルの以下のカラムを参照・更新します。
 
 - `name`
-- `user_id`
+- `userid`
 - `note`
 - `plan_status`
 - `icon_url`

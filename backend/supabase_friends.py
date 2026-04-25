@@ -57,7 +57,7 @@ def _friend_from_relation(relation: dict, users_by_id: dict[int, dict]) -> Frien
     return Friend(
         id=int(relation["id"]),
         name=user.get("name") or f"ユーザー{friend_user_id}",
-        public_user_id=user.get("user_id"),
+        public_user_id=user.get("userid"),
         status="available",
     )
 
@@ -67,7 +67,7 @@ def _get_users_by_ids(user_ids: list[int]) -> dict[int, dict]:
         return {}
 
     ids = ",".join(str(user_id) for user_id in sorted(set(user_ids)))
-    rows = _request("GET", f"User?select=id,name,user_id,note&id=in.({ids})")
+    rows = _request("GET", f"User?select=id,name,userid,note&id=in.({ids})")
     return {int(row["id"]): row for row in rows}
 
 
@@ -75,7 +75,7 @@ def _candidate_from_user(row: dict) -> FriendCandidate:
     return FriendCandidate(
         id=int(row["id"]),
         name=row.get("name") or f"ユーザー{row['id']}",
-        user_id=row.get("user_id") or "",
+        user_id=row.get("userid") or "",
         note=row.get("note"),
     )
 
@@ -93,7 +93,7 @@ def search_friend_candidates(name: str, owner_user_id: int) -> list[FriendCandid
     keyword = quote(name.strip(), safe="")
     rows = _request(
         "GET",
-        f"User?select=id,name,user_id,note&name=eq.{keyword}&order=id.asc&limit=20",
+        f"User?select=id,name,userid,note&name=eq.{keyword}&order=id.asc&limit=20",
     )
     return [_candidate_from_user(row) for row in rows if int(row["id"]) != owner_user_id]
 
@@ -102,7 +102,7 @@ def find_friend_candidate_by_public_user_id(public_user_id: str, owner_user_id: 
     keyword = quote(public_user_id.strip(), safe="")
     rows = _request(
         "GET",
-        f"User?select=id,name,user_id,note&user_id=eq.{keyword}&limit=1",
+        f"User?select=id,name,userid,note&userid=eq.{keyword}&limit=1",
     )
     if not rows:
         return None
@@ -118,14 +118,14 @@ def create_friend(payload: FriendCreate, owner_user_id: int) -> Friend:
     friend_user = None
 
     if payload.user_db_id is not None:
-      user_rows = _request("GET", f"User?select=id,name,user_id,note&id=eq.{payload.user_db_id}&limit=1")
+      user_rows = _request("GET", f"User?select=id,name,userid,note&id=eq.{payload.user_db_id}&limit=1")
       friend_user = user_rows[0] if user_rows else None
     elif payload.public_user_id:
       candidate = find_friend_candidate_by_public_user_id(payload.public_user_id, owner_user_id)
       friend_user = {
           "id": candidate.id,
           "name": candidate.name,
-          "user_id": candidate.user_id,
+          "userid": candidate.user_id,
           "note": candidate.note,
       } if candidate else None
     elif payload.name:
@@ -134,7 +134,7 @@ def create_friend(payload: FriendCreate, owner_user_id: int) -> Friend:
           friend_user = {
               "id": candidates[0].id,
               "name": candidates[0].name,
-              "user_id": candidates[0].user_id,
+              "userid": candidates[0].user_id,
               "note": candidates[0].note,
           }
 

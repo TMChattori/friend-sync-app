@@ -138,7 +138,7 @@ def _session_from_response(
         access_token=data.get("access_token") or fallback_token,
         db_user_id=int(app_user["id"]) if app_user and app_user.get("id") is not None else None,
         username=app_user.get("name") if app_user else None,
-        public_user_id=app_user.get("user_id") if app_user else None,
+        public_user_id=app_user.get("userid") if app_user else None,
         note=app_user.get("note") if app_user else None,
         icon_url=app_user.get("icon_url") if app_user else None,
         plan_status=app_user.get("plan_status") if app_user and app_user.get("plan_status") else "free",
@@ -163,7 +163,7 @@ def ensure_app_user(email: str, username: str | None = None) -> dict:
     encoded_email = quote(email, safe="")
     existing_rows = _db_request(
         "GET",
-        f"User?select=id,name,user_id,note,icon_url,mailadress,plan_status&mailadress=eq.{encoded_email}&limit=1",
+        f"User?select=id,name,userid,note,icon_url,mailadress,plan_status&mailadress=eq.{encoded_email}&limit=1",
     )
     if existing_rows:
         existing_user = existing_rows[0]
@@ -178,7 +178,7 @@ def ensure_app_user(email: str, username: str | None = None) -> dict:
         "User",
         {
             "name": _build_default_name(email, username),
-            "user_id": _build_public_user_id(email),
+            "userid": _build_public_user_id(email),
             "mailadress": email,
             "plan_status": "free",
         },
@@ -229,12 +229,12 @@ def update_app_user_profile(access_token: str, current_email: str, payload: Auth
         encoded_public_user_id = quote(public_user_id, safe="")
         existing_rows = _db_request(
             "GET",
-            f"User?select=id&user_id=eq.{encoded_public_user_id}&id=neq.{app_user['id']}&limit=1",
+            f"User?select=id&userid=eq.{encoded_public_user_id}&id=neq.{app_user['id']}&limit=1",
         )
         if existing_rows:
             raise SupabaseRequestError(409, "user_id already exists")
 
-        update_payload["user_id"] = public_user_id
+        update_payload["userid"] = public_user_id
 
     if payload.note is not None:
         note = payload.note.strip()
