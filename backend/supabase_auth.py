@@ -1,0 +1,199 @@
+import os
+from time import time
+from urllib.parse import quote
+
+import certifi
+import httpx
+from dotenv import load_dotenv
+
+from schemas import AuthCredentials, AuthSession, AuthUpdate, PasswordResetRequest
+from supabase_events import SupabaseConfigError, SupabaseRequestError
+
+
+load_dotenv()
+
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
+
+
+def _ensure_config() -> None:
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise SupabaseConfigError("SUPABASE_URL and SUPABASE_KEY are required in backend/.env")
+
+
+def _headers(access_token: str | None = None) -> dict[str, str]:
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {access_token or SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+
+def _request(method: str, path: str, json: dict | None = None, access_token: str | None = None) -> dict:
+    _ensure_config()
+
+    with httpx.Client(verify=certifi.where(), timeout=10) as client:
+        response = client.request(
+            method,
+            f"{SUPABASE_URL}/auth/v1/{path}",
+            headers=_headers(access_token),
+            json=json,
+        )
+
+    if response.status_code >= 400:
+        raise SupabaseRequestError(response.status_code, response.text)
+
+    if not response.content:
+        return {}
+
+    data = response.json()
+    return data if isinstance(data, dict) else {}
+
+
+def _db_headers() -> dict[str, str]:
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Prefer": "return=representation",
+    }
+
+
+def _db_request(method: str, path: str, json: dict | None = None) -> list[dict]:
+    _ensure_config()
+
+    with httpx.Client(verify=certifi.where(), timeout=10) as client:
+        response = client.request(
+            method,
+            f"{SUPABASE_URL}/rest/v1/{path}",
+            headers=_db_headers(),
+            json=json,
+        )
+
+    if response.status_code >= 400:
+        raise SupabaseRequestError(response.status_code, response.text)
+
+    if not response.content:
+        return []
+
+    data = response.json()
+    return data if isinstance(data, list) else [data]
+
+
+def _session_from_response(data: dict, fallback_email: str, fallback_token: str | None = None) -> AuthSession:
+    user = data.get("user") if isinstance(data.get("user"), dict) else data
+    email = user.get("email") if isinstance(user, dict) else None
+
+    return AuthSession(
+        email=email or fallback_email,
+        access_token=data.get("access_token") or fallback_token,
+    )
+
+
+def _build_public_user_id(email: str) -> str:
+    local_part = email.split("@")[0].strip().lower()
+    normalized = "".join(character for character in local_part if character.isascii() and character.isalnum())
+    suffix = int(time() * 1000)
+    return f"{normalized or 'user'}_{suffix}"
+
+
+def _build_default_name(email: str, username: str | None = None) -> str:
+    if username and username.strip():
+        return username.strip()[:30]
+    local_part = email.split("@")[0].strip()
+    return local_part[:30] or "新規ユーザー"
+
+
+def ensure_app_user(email: str, username: str | None = None) -> None:
+    encoded_email = quote(email, safe="")
+    existing_rows = _db_request("GET", f"User?select=id,mailadress&mailadress=eq.{encoded_email}&limit=1")
+    if existing_rows:
+        return
+
+    _db_request(
+        "POST",
+        "User",
+        {
+            "name": _build_default_name(email, username),
+            "user_id": _build_public_user_id(email),
+            "mailadress": email,
+            "plan_status": "free",
+        },
+    )
+
+
+def sync_app_user_email(current_email: str, new_email: str) -> None:
+    if not current_email or current_email == new_email:
+        return
+
+    encoded_current_email = quote(current_email, safe="")
+    rows = _db_request("GET", f"User?select=id,mailadress&mailadress=eq.{encoded_current_email}&limit=1")
+    if not rows:
+        ensure_app_user(new_email)
+        return
+
+    user_id = rows[0]["id"]
+    _db_request("PATCH", f"User?id=eq.{user_id}", {"mailadress": new_email})
+
+
+def register_user(payload: AuthCredentials) -> AuthSession:
+    data = _request(
+        "POST",
+        "signup",
+        {
+            "email": payload.email,
+            "password": payload.password,
+        },
+    )
+    session = _session_from_response(data, payload.email)
+    ensure_app_user(payload.email, payload.username)
+
+    if session.access_token:
+        return session
+
+    try:
+        return login_user(payload)
+    except SupabaseRequestError:
+        return session
+
+
+def login_user(payload: AuthCredentials) -> AuthSession:
+    data = _request(
+        "POST",
+        "token?grant_type=password",
+        {
+            "email": payload.email,
+            "password": payload.password,
+        },
+    )
+    ensure_app_user(payload.email, payload.username)
+    return _session_from_response(data, payload.email)
+
+
+def update_user(access_token: str, payload: AuthUpdate, current_email: str) -> AuthSession:
+    update_payload = {
+        key: value
+        for key, value in {
+            "email": payload.email,
+            "password": payload.password,
+        }.items()
+        if value
+    }
+
+    data = _request("PUT", "user", update_payload, access_token)
+    updated_email = payload.email or current_email
+    if payload.email:
+        sync_app_user_email(current_email, payload.email)
+    return _session_from_response(data, updated_email, access_token)
+
+
+def send_password_reset_email(payload: PasswordResetRequest) -> None:
+    _request(
+        "POST",
+        "recover",
+        {
+            "email": payload.email,
+        },
+    )

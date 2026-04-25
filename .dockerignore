@@ -1,0 +1,14 @@
+.git
+.gitignore
+.expo
+.vscode
+node_modules
+npm-debug.log
+backend/.venv
+backend/__pycache__
+backend/.env
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
