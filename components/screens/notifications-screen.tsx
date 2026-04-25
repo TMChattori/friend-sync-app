@@ -103,13 +103,6 @@ export function NotificationsScreenContent() {
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         <ScreenHeader title="通知" subtitle="お誘いの送信や返事をまとめて確認できます。" />
 
-        <AppCard style={styles.infoCard}>
-          <Text style={styles.infoTitle}>MVPの進め方</Text>
-          <Text style={styles.infoText}>
-            このアプリでは「誘う」までを完結させて、その後の集合時間や場所などの細かい調整はLINEで進める想定です。
-          </Text>
-        </AppCard>
-
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>通知一覧</Text>
           <View style={styles.notificationList}>
@@ -144,9 +137,6 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#f6f7fb' },
   container: { flex: 1, backgroundColor: '#f6f7fb' },
   content: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 40, gap: 18 },
-  infoCard: { padding: 18, borderWidth: 1, borderColor: '#e7ebf3' },
-  infoTitle: { fontSize: 16, fontWeight: '800', color: '#152033' },
-  infoText: { marginTop: 8, fontSize: 14, lineHeight: 22, color: '#6c7a90' },
   section: { gap: 12 },
   sectionTitle: { fontSize: 20, fontWeight: '800', color: '#152033' },
   notificationList: { gap: 12 },

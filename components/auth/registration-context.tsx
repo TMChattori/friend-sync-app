@@ -22,7 +22,7 @@ type RegistrationContextValue = {
   isRegistered: boolean;
   authSession: AuthSession | null;
   completeRegistration: (session: AuthSession) => void;
-  updateAuthSession: (session: AuthSession) => void;
+  updateAuthSession: (session: AuthSession | ((current: AuthSession | null) => AuthSession | null)) => void;
 };
 
 const RegistrationContext = createContext<RegistrationContextValue | null>(null);
@@ -102,8 +102,13 @@ export function RegistrationProvider({ children }: { children: ReactNode }) {
       completeRegistration: (session: AuthSession) => {
         void persistSession(session);
       },
-      updateAuthSession: (session: AuthSession) => {
-        void persistSession(session);
+      updateAuthSession: (sessionOrUpdater: AuthSession | ((current: AuthSession | null) => AuthSession | null)) => {
+        const nextSession =
+          typeof sessionOrUpdater === 'function' ? sessionOrUpdater(authSession) : sessionOrUpdater;
+
+        if (nextSession) {
+          void persistSession(nextSession);
+        }
       },
     }),
     [authSession, isReady]

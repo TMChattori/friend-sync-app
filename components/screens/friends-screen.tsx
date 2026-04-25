@@ -6,7 +6,6 @@ import QRCode from 'react-native-qrcode-svg';
 import { useRegistration } from '@/components/auth/registration-context';
 import { AppButton } from '@/components/common/app-button';
 import { AppCard } from '@/components/common/app-card';
-import { ScreenHeader } from '@/components/common/screen-header';
 import { getCurrentUserProfile } from '@/data/mock-data';
 import {
   createFriendByDbId,
@@ -188,8 +187,6 @@ export function FriendsScreenContent() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        <ScreenHeader title="友達" subtitle="つながっている友達を一覧で確認したり、新しく追加したりできます。" />
-
         <AppCard style={styles.selfCard}>
           <View style={styles.selfAvatar}>
             <Text style={styles.selfAvatarText}>{profile.name.slice(0, 1) || 'U'}</Text>

@@ -215,6 +215,15 @@ export function SettingsScreenContent() {
               <Pressable
                 onPress={() => {
                   setSavedProfile(draftProfile);
+                  updateAuthSession((current) =>
+                    current
+                      ? {
+                          ...current,
+                          username: draftProfile.name,
+                          publicUserId: draftProfile.userId,
+                        }
+                      : current
+                  );
                 }}
                 style={styles.updateButton}>
                 <Text style={styles.updateButtonText}>更新</Text>
