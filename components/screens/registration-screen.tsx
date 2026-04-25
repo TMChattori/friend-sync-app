@@ -27,6 +27,7 @@ export function RegistrationScreenContent() {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordConfirmation, setPasswordConfirmation] = useState('');
   const [agreedToPrivacy, setAgreedToPrivacy] = useState(false);
   const [isPrivacyModalVisible, setIsPrivacyModalVisible] = useState(false);
   const [isResetModalVisible, setIsResetModalVisible] = useState(false);
@@ -95,6 +96,11 @@ export function RegistrationScreenContent() {
 
     if (password.length < 8) {
       Alert.alert('パスワードを確認してください', 'パスワードは8文字以上で入力してください。');
+      return;
+    }
+
+    if (password !== passwordConfirmation) {
+      Alert.alert('パスワードを確認してください', 'パスワードが2回とも一致しているか確認してください。');
       return;
     }
 
@@ -224,6 +230,17 @@ export function RegistrationScreenContent() {
               autoCapitalize="none"
               autoCorrect={false}
             />
+            {isRegisterMode ? (
+              <InputGroup
+                label="パスワード確認"
+                value={passwordConfirmation}
+                onChangeText={setPasswordConfirmation}
+                placeholder="同じパスワードをもう一度入力"
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            ) : null}
 
             {isRegisterMode ? (
               <>

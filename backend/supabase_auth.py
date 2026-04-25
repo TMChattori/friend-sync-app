@@ -82,13 +82,21 @@ def _db_request(method: str, path: str, json: dict | None = None) -> list[dict]:
     return data if isinstance(data, list) else [data]
 
 
-def _session_from_response(data: dict, fallback_email: str, fallback_token: str | None = None) -> AuthSession:
+def _session_from_response(
+    data: dict,
+    fallback_email: str,
+    fallback_token: str | None = None,
+    app_user: dict | None = None,
+) -> AuthSession:
     user = data.get("user") if isinstance(data.get("user"), dict) else data
     email = user.get("email") if isinstance(user, dict) else None
 
     return AuthSession(
         email=email or fallback_email,
         access_token=data.get("access_token") or fallback_token,
+        username=app_user.get("name") if app_user else None,
+        public_user_id=app_user.get("user_id") if app_user else None,
+        plan_status=app_user.get("plan_status") if app_user and app_user.get("plan_status") else "free",
     )
 
 
@@ -106,13 +114,16 @@ def _build_default_name(email: str, username: str | None = None) -> str:
     return local_part[:30] or "新規ユーザー"
 
 
-def ensure_app_user(email: str, username: str | None = None) -> None:
+def ensure_app_user(email: str, username: str | None = None) -> dict:
     encoded_email = quote(email, safe="")
-    existing_rows = _db_request("GET", f"User?select=id,mailadress&mailadress=eq.{encoded_email}&limit=1")
+    existing_rows = _db_request(
+        "GET",
+        f"User?select=id,name,user_id,mailadress,plan_status&mailadress=eq.{encoded_email}&limit=1",
+    )
     if existing_rows:
-        return
+        return existing_rows[0]
 
-    _db_request(
+    rows = _db_request(
         "POST",
         "User",
         {
@@ -122,6 +133,7 @@ def ensure_app_user(email: str, username: str | None = None) -> None:
             "plan_status": "free",
         },
     )
+    return rows[0]
 
 
 def sync_app_user_email(current_email: str, new_email: str) -> None:
@@ -147,8 +159,8 @@ def register_user(payload: AuthCredentials) -> AuthSession:
             "password": payload.password,
         },
     )
-    session = _session_from_response(data, payload.email)
-    ensure_app_user(payload.email, payload.username)
+    app_user = ensure_app_user(payload.email, payload.username)
+    session = _session_from_response(data, payload.email, app_user=app_user)
 
     if session.access_token:
         return session
@@ -168,8 +180,8 @@ def login_user(payload: AuthCredentials) -> AuthSession:
             "password": payload.password,
         },
     )
-    ensure_app_user(payload.email, payload.username)
-    return _session_from_response(data, payload.email)
+    app_user = ensure_app_user(payload.email, payload.username)
+    return _session_from_response(data, payload.email, app_user=app_user)
 
 
 def update_user(access_token: str, payload: AuthUpdate, current_email: str) -> AuthSession:
@@ -186,7 +198,8 @@ def update_user(access_token: str, payload: AuthUpdate, current_email: str) -> A
     updated_email = payload.email or current_email
     if payload.email:
         sync_app_user_email(current_email, payload.email)
-    return _session_from_response(data, updated_email, access_token)
+    app_user = ensure_app_user(updated_email)
+    return _session_from_response(data, updated_email, access_token, app_user)
 
 
 def send_password_reset_email(payload: PasswordResetRequest) -> None:

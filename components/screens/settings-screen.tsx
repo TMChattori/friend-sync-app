@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
@@ -17,15 +17,31 @@ const PLAN_LABELS: Record<PlanStatus, string> = {
 
 export function SettingsScreenContent() {
   const { authSession, updateAuthSession } = useRegistration();
-  const initialProfile = getCurrentUserProfile();
+  const fallbackProfile = useMemo(() => getCurrentUserProfile(), []);
+  const initialProfile = useMemo(
+    () => ({
+      ...fallbackProfile,
+      name: authSession?.username || fallbackProfile.name,
+      userId: authSession?.publicUserId || fallbackProfile.userId,
+    }),
+    [authSession?.publicUserId, authSession?.username, fallbackProfile]
+  );
   const [savedProfile, setSavedProfile] = useState(initialProfile);
   const [draftProfile, setDraftProfile] = useState(initialProfile);
-  const [savedPlan, setSavedPlan] = useState<PlanStatus>('free');
-  const [draftPlan, setDraftPlan] = useState<PlanStatus>('free');
+  const planStatus = authSession?.planStatus === 'premium' ? 'premium' : 'free';
   const [draftEmail, setDraftEmail] = useState(authSession?.email ?? '');
   const [draftPassword, setDraftPassword] = useState('');
   const [draftPasswordConfirmation, setDraftPasswordConfirmation] = useState('');
   const [isAuthUpdating, setIsAuthUpdating] = useState(false);
+
+  useEffect(() => {
+    setSavedProfile(initialProfile);
+    setDraftProfile((current) => ({
+      ...current,
+      name: initialProfile.name,
+      userId: initialProfile.userId,
+    }));
+  }, [initialProfile]);
 
   const updateProfile = (key: keyof typeof draftProfile, value: string) => {
     setDraftProfile((current) => ({ ...current, [key]: value }));
@@ -113,9 +129,9 @@ export function SettingsScreenContent() {
             <View style={styles.profileInfo}>
               <View style={styles.profileNameRow}>
                 <Text style={styles.profileName}>{savedProfile.name || '名前未設定'}</Text>
-                <View style={[styles.planBadge, savedPlan === 'premium' && styles.planBadgePremium]}>
-                  <Text style={[styles.planBadgeText, savedPlan === 'premium' && styles.planBadgeTextPremium]}>
-                    {PLAN_LABELS[savedPlan]}
+                <View style={[styles.planBadge, planStatus === 'premium' && styles.planBadgePremium]}>
+                  <Text style={[styles.planBadgeText, planStatus === 'premium' && styles.planBadgeTextPremium]}>
+                    {PLAN_LABELS[planStatus]}
                   </Text>
                 </View>
               </View>
@@ -183,21 +199,9 @@ export function SettingsScreenContent() {
             <InputGroup label="ID" value={draftProfile.userId} onChangeText={(value) => updateProfile('userId', value)} autoCapitalize="none" />
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>ステータス</Text>
-              <View style={styles.planSelectRow}>
-                {(['free', 'premium'] as const).map((plan) => {
-                  const active = draftPlan === plan;
-
-                  return (
-                    <Pressable
-                      key={plan}
-                      onPress={() => setDraftPlan(plan)}
-                      style={[styles.planSelectButton, active && styles.planSelectButtonActive, plan === 'premium' && active && styles.planSelectButtonPremium]}>
-                      <Text style={[styles.planSelectText, active && styles.planSelectTextActive]}>
-                        {PLAN_LABELS[plan]}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
+              <View style={styles.readOnlyPlanBox}>
+                <Text style={styles.readOnlyPlanText}>{PLAN_LABELS[planStatus]}</Text>
+                <Text style={styles.readOnlyPlanHint}>プランはアカウント状態に応じて自動で反映されます。</Text>
               </View>
             </View>
             <InputGroup
@@ -211,7 +215,6 @@ export function SettingsScreenContent() {
               <Pressable
                 onPress={() => {
                   setSavedProfile(draftProfile);
-                  setSavedPlan(draftPlan);
                 }}
                 style={styles.updateButton}>
                 <Text style={styles.updateButtonText}>更新</Text>
@@ -315,22 +318,19 @@ const styles = StyleSheet.create({
   iconPickerHint: { fontSize: 12, lineHeight: 17, color: '#6c7a90' },
   imagePickButton: { borderRadius: 999, backgroundColor: '#1f6fff', paddingHorizontal: 14, paddingVertical: 10 },
   imagePickButtonText: { color: '#ffffff', fontSize: 13, fontWeight: '800' },
-  planSelectRow: { flexDirection: 'row', gap: 10 },
-  planSelectButton: {
-    flex: 1,
-    minHeight: 48,
+  readOnlyPlanBox: {
+    minHeight: 56,
     borderRadius: 16,
     backgroundColor: '#f6f8fc',
     borderWidth: 1,
     borderColor: '#e7ebf3',
-    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 4,
   },
-  planSelectButtonActive: { backgroundColor: '#1f6fff', borderColor: '#1f6fff' },
-  planSelectButtonPremium: { backgroundColor: '#f4a71d', borderColor: '#f4a71d' },
-  planSelectText: { fontSize: 14, fontWeight: '900', color: '#6c7a90' },
-  planSelectTextActive: { color: '#ffffff' },
+  readOnlyPlanText: { fontSize: 15, fontWeight: '900', color: '#152033' },
+  readOnlyPlanHint: { fontSize: 12, lineHeight: 17, color: '#6c7a90' },
   input: {
     minHeight: 48,
     borderRadius: 16,

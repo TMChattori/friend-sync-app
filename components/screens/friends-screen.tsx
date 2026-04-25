@@ -3,6 +3,7 @@ import { Alert, Modal, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, Te
 import { useFocusEffect } from '@react-navigation/native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import QRCode from 'react-native-qrcode-svg';
+import { useRegistration } from '@/components/auth/registration-context';
 import { AppButton } from '@/components/common/app-button';
 import { AppCard } from '@/components/common/app-card';
 import { ScreenHeader } from '@/components/common/screen-header';
@@ -26,6 +27,7 @@ function normalizeQrId(value: string) {
 }
 
 export function FriendsScreenContent() {
+  const { authSession } = useRegistration();
   const [searchText, setSearchText] = useState('');
   const [isIdModalVisible, setIsIdModalVisible] = useState(false);
   const [isQrModalVisible, setIsQrModalVisible] = useState(false);
@@ -38,7 +40,15 @@ export function FriendsScreenContent() {
   const [isLoadingFriends, setIsLoadingFriends] = useState(true);
   const [friendsError, setFriendsError] = useState<string | null>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  const profile = useMemo(() => getCurrentUserProfile(), []);
+  const fallbackProfile = useMemo(() => getCurrentUserProfile(), []);
+  const profile = useMemo(
+    () => ({
+      ...fallbackProfile,
+      name: authSession?.username || fallbackProfile.name,
+      userId: authSession?.publicUserId || fallbackProfile.userId,
+    }),
+    [authSession?.publicUserId, authSession?.username, fallbackProfile]
+  );
   const myQrValue = useMemo(() => `friendsyncapp://friend?id=${encodeURIComponent(profile.userId)}`, [profile.userId]);
 
   const loadFriends = useCallback(async () => {
@@ -64,7 +74,9 @@ export function FriendsScreenContent() {
     const keyword = searchText.trim().toLowerCase();
     if (!keyword) return friends;
     return friends.filter(
-      (friend) => friend.name.toLowerCase().includes(keyword) || String(friend.id).includes(keyword)
+      (friend) =>
+        friend.name.toLowerCase().includes(keyword) ||
+        (friend.public_user_id ?? '').toLowerCase().includes(keyword)
     );
   }, [friends, searchText]);
   const hasSearchKeyword = searchText.trim().length > 0;
@@ -178,15 +190,24 @@ export function FriendsScreenContent() {
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         <ScreenHeader title="友達" subtitle="つながっている友達を一覧で確認したり、新しく追加したりできます。" />
 
-        <AppCard style={styles.searchCard}>
-          <TextInput
-            value={searchText}
-            onChangeText={setSearchText}
-            placeholder="名前やIDで友達を探す"
-            placeholderTextColor="#8a97ab"
-            style={styles.searchInput}
-          />
+        <AppCard style={styles.selfCard}>
+          <View style={styles.selfAvatar}>
+            <Text style={styles.selfAvatarText}>{profile.name.slice(0, 1) || 'U'}</Text>
+          </View>
+          <View style={styles.selfInfo}>
+            <Text style={styles.selfLabel}>あなたの情報</Text>
+            <Text numberOfLines={1} ellipsizeMode="tail" style={styles.selfName}>{profile.name || '名前未設定'}</Text>
+            <Text style={styles.selfId}>ID: {profile.userId || '未設定'}</Text>
+          </View>
         </AppCard>
+
+        <TextInput
+          value={searchText}
+          onChangeText={setSearchText}
+          placeholder="名前やIDで友達を探す"
+          placeholderTextColor="#8a97ab"
+          style={styles.searchInput}
+        />
 
         <View style={styles.actionRow}>
           <AppButton label="IDで追加" onPress={() => setIsIdModalVisible(true)} />
@@ -209,7 +230,7 @@ export function FriendsScreenContent() {
                   </View>
                   <View style={styles.friendInfo}>
                     <Text numberOfLines={1} ellipsizeMode="tail" style={styles.friendName}>{friend.name}</Text>
-                    <Text style={styles.friendId}>ID: {friend.id}</Text>
+                    <Text style={styles.friendId}>ID: {friend.public_user_id ?? '未設定'}</Text>
                     <Text style={styles.friendNote}>{friend.status === 'available' ? '今は空いています' : '予定があります'}</Text>
                   </View>
                   <AppButton label="削除" variant="secondary" onPress={() => handleDeleteFriend(friend)} />
@@ -346,14 +367,29 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#f6f7fb' },
   container: { flex: 1, backgroundColor: '#f6f7fb' },
   content: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 120, gap: 18 },
-  searchCard: { padding: 12, shadowOpacity: 0.04, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 1 },
+  selfCard: { padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  selfAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    backgroundColor: '#1f6fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selfAvatarText: { fontSize: 20, fontWeight: '900', color: '#ffffff' },
+  selfInfo: { flex: 1, minWidth: 0, gap: 3 },
+  selfLabel: { fontSize: 12, fontWeight: '900', color: '#6f7f95' },
+  selfName: { fontSize: 19, fontWeight: '900', color: '#152033' },
+  selfId: { fontSize: 13, fontWeight: '800', color: '#1f6fff' },
   searchInput: {
     height: 48,
     borderRadius: 16,
-    backgroundColor: '#f6f8fc',
+    backgroundColor: '#ffffff',
     paddingHorizontal: 16,
     fontSize: 15,
     color: '#152033',
+    borderWidth: 1,
+    borderColor: '#e7ebf3',
   },
   actionRow: { flexDirection: 'row', gap: 12 },
   section: { gap: 12 },

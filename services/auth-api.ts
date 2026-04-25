@@ -3,17 +3,26 @@ import { getApiBaseUrl } from '@/services/events-api';
 export type AuthSession = {
   email: string;
   accessToken: string | null;
+  username?: string | null;
+  publicUserId?: string | null;
+  planStatus?: 'free' | 'premium' | string;
 };
 
 type ApiAuthSession = {
   email: string;
   access_token?: string | null;
+  username?: string | null;
+  public_user_id?: string | null;
+  plan_status?: string | null;
 };
 
 function mapSession(session: ApiAuthSession): AuthSession {
   return {
     email: session.email,
     accessToken: session.access_token ?? null,
+    username: session.username ?? null,
+    publicUserId: session.public_user_id ?? null,
+    planStatus: session.plan_status ?? 'free',
   };
 }
 

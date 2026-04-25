@@ -71,6 +71,9 @@ class AuthUpdate(BaseModel):
 class AuthSession(BaseModel):
     email: str = Field(..., description="ログイン中のメールアドレス")
     access_token: str | None = Field(default=None, description="Supabase Auth のアクセストークン")
+    username: str | None = Field(default=None, description="表示用ユーザ名")
+    public_user_id: str | None = Field(default=None, description="公開ユーザーID")
+    plan_status: str = Field(default="free", description="プラン状態")
 
 
 class PasswordResetRequest(BaseModel):
