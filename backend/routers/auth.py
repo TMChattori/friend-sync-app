@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile, status
 
 from schemas import AuthCredentials, AuthProfileUpdate, AuthSession, AuthUpdate, PasswordResetRequest
-from supabase_auth import login_user, register_user, send_password_reset_email, update_app_user_profile, update_user
+from supabase_auth import login_user, register_user, send_password_reset_email, update_app_user_profile, update_user, upload_profile_icon
 from supabase_events import SupabaseConfigError, SupabaseRequestError
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -71,6 +71,34 @@ def update_profile(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     except SupabaseRequestError as exc:
         raise _handle_supabase_error(exc) from exc
+
+
+@router.post("/profile/icon")
+async def upload_profile_icon_file(
+    file: UploadFile = File(...),
+    authorization: str | None = Header(default=None),
+    x_current_email: str | None = Header(default=None),
+) -> dict[str, str]:
+    _get_bearer_token(authorization)
+
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="image file is required")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="image file is empty")
+
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="image file is too large")
+
+    try:
+        icon_url = upload_profile_icon(x_current_email or "", content, file.content_type)
+    except SupabaseConfigError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+    except SupabaseRequestError as exc:
+        raise _handle_supabase_error(exc) from exc
+
+    return {"icon_url": icon_url}
 
 
 @router.post("/password-reset", status_code=status.HTTP_204_NO_CONTENT)

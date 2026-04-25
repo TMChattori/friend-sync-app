@@ -6,7 +6,7 @@ import { useRegistration } from '@/components/auth/registration-context';
 import { AppCard } from '@/components/common/app-card';
 import { ScreenHeader } from '@/components/common/screen-header';
 import { getCurrentUserProfile } from '@/data/mock-data';
-import { updateAppUserProfile, updateAuthProfile } from '@/services/auth-api';
+import { updateAppUserProfile, updateAuthProfile, uploadProfileIcon } from '@/services/auth-api';
 
 type PlanStatus = 'free' | 'premium';
 
@@ -14,6 +14,10 @@ const PLAN_LABELS: Record<PlanStatus, string> = {
   free: '無料プラン',
   premium: 'プレミアムプラン',
 };
+
+function shouldUploadIcon(iconUri: string, currentIconUrl?: string | null) {
+  return Boolean(iconUri) && iconUri !== currentIconUrl && !iconUri.startsWith('http://') && !iconUri.startsWith('https://');
+}
 
 export function SettingsScreenContent() {
   const { authSession, updateAuthSession } = useRegistration();
@@ -94,12 +98,24 @@ export function SettingsScreenContent() {
 
     try {
       setIsProfileUpdating(true);
+      let iconUrl = authSession.iconUrl ?? undefined;
+
+      if (shouldUploadIcon(draftProfile.icon, authSession.iconUrl)) {
+        const uploadedIcon = await uploadProfileIcon({
+          accessToken: authSession.accessToken,
+          currentEmail: authSession.email,
+          imageUri: draftProfile.icon,
+        });
+        iconUrl = uploadedIcon.icon_url;
+      }
+
       const updatedSession = await updateAppUserProfile({
         accessToken: authSession.accessToken,
         currentEmail: authSession.email,
         username: trimmedName,
         publicUserId: trimmedUserId,
         note: trimmedNote || undefined,
+        iconUrl,
       });
       updateAuthSession(updatedSession);
       setSavedProfile((current) => ({
@@ -116,7 +132,7 @@ export function SettingsScreenContent() {
         note: updatedSession.note || current.note,
         icon: updatedSession.iconUrl || current.icon,
       }));
-      Alert.alert('プロフィールを更新しました', '名前、ID、一言を保存しました。');
+      Alert.alert('プロフィールを更新しました', '名前、ID、一言、アイコンを保存しました。');
     } catch (error) {
       const message = error instanceof Error ? error.message : '入力内容またはサーバー接続を確認してください。';
       Alert.alert('プロフィールを更新できませんでした', message);
@@ -246,7 +262,7 @@ export function SettingsScreenContent() {
                 </View>
                 <View style={styles.iconPickerTextBlock}>
                   <Text style={styles.iconPickerTitle}>写真フォルダから選択</Text>
-                  <Text style={styles.iconPickerHint}>画像の本保存はSupabase Storage連携後に対応します。</Text>
+                  <Text style={styles.iconPickerHint}>更新ボタンでプロフィール画像として保存されます。</Text>
                 </View>
                 <Pressable onPress={pickProfileImage} style={styles.imagePickButton}>
                   <Text style={styles.imagePickButtonText}>選択</Text>

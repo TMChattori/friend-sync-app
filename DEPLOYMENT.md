@@ -121,6 +121,7 @@ Render の `Environment` セクションで、以下を設定します。
 
 - `SUPABASE_URL`
 - `SUPABASE_KEY`
+- `SUPABASE_STORAGE_BUCKET`
 
 ### 必要に応じて
 
@@ -134,6 +135,7 @@ SUPABASE_URL=https://your-project-id.supabase.co
 SUPABASE_KEY=your-supabase-key
 SUPABASE_SERVICE_ROLE_KEY=
 SELF_DB_USER_ID=1
+SUPABASE_STORAGE_BUCKET=profile-icons
 ```
 
 補足:
@@ -319,7 +321,41 @@ Render デプロイの次にやると良いもの:
 
 ---
 
-## 15. App Store に出す手順
+## 15. Supabase Userプロフィール設定
+
+設定画面では `User` テーブルの以下のカラムを参照・更新します。
+
+- `name`
+- `user_id`
+- `note`
+- `plan_status`
+- `icon_url`
+
+足りないカラムがある場合は、Supabase SQL Editor で追加します。
+
+```sql
+alter table "User"
+add column if not exists note text,
+add column if not exists plan_status text default 'free',
+add column if not exists icon_url text;
+```
+
+プロフィール画像は Supabase Storage に保存し、生成された公開URLを `User.icon_url` に保存します。
+
+Supabase Storage で以下を作成します。
+
+- Bucket name: `profile-icons`
+- Public bucket: on
+
+Render の Environment Variables にも追加します。
+
+```env
+SUPABASE_STORAGE_BUCKET=profile-icons
+```
+
+---
+
+## 16. App Store に出す手順
 
 Expo Go ではなく App Store で配布するには、EAS Build / EAS Submit を使います。
 

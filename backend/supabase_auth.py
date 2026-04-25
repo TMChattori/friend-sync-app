@@ -1,6 +1,7 @@
 import os
 from time import time
 from urllib.parse import quote
+from uuid import uuid4
 
 import certifi
 import httpx
@@ -14,6 +15,7 @@ load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
+SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "profile-icons")
 
 
 def _ensure_config() -> None:
@@ -80,6 +82,46 @@ def _db_request(method: str, path: str, json: dict | None = None) -> list[dict]:
 
     data = response.json()
     return data if isinstance(data, list) else [data]
+
+
+def _storage_headers(content_type: str) -> dict[str, str]:
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": content_type,
+        "x-upsert": "true",
+    }
+
+
+def _extension_from_content_type(content_type: str) -> str:
+    if content_type == "image/png":
+        return "png"
+    if content_type == "image/webp":
+        return "webp"
+    return "jpg"
+
+
+def upload_profile_icon(current_email: str, content: bytes, content_type: str | None) -> str:
+    if not current_email:
+        raise SupabaseRequestError(400, "current email is required")
+
+    app_user = ensure_app_user(current_email)
+    normalized_content_type = content_type if content_type in {"image/jpeg", "image/png", "image/webp"} else "image/jpeg"
+    extension = _extension_from_content_type(normalized_content_type)
+    object_path = f"user-{app_user['id']}/{uuid4().hex}.{extension}"
+
+    with httpx.Client(verify=certifi.where(), timeout=20) as client:
+        response = client.post(
+            f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_STORAGE_BUCKET}/{object_path}",
+            headers=_storage_headers(normalized_content_type),
+            content=content,
+        )
+
+    if response.status_code >= 400:
+        raise SupabaseRequestError(response.status_code, response.text)
+
+    encoded_path = quote(object_path, safe="/")
+    return f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_STORAGE_BUCKET}/{encoded_path}"
 
 
 def _session_from_response(

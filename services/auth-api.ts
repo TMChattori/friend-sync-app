@@ -72,6 +72,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function requestForm<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, init);
+
+  if (!response.ok) {
+    let message = `API request failed: ${response.status}`;
+
+    try {
+      const errorBody = await response.json();
+      const detail = errorBody?.detail;
+      if (typeof detail === 'string') {
+        message = detail;
+      }
+    } catch {
+      // レスポンス本文がない場合はステータスだけを使います。
+    }
+
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<T>;
+}
+
 export async function registerWithEmail(username: string, email: string, password: string) {
   const session = await request<ApiAuthSession>('/auth/register', {
     method: 'POST',
@@ -146,6 +168,35 @@ export async function updateAppUserProfile({
   });
 
   return mapSession(session);
+}
+
+export async function uploadProfileIcon({
+  accessToken,
+  currentEmail,
+  imageUri,
+}: {
+  accessToken: string;
+  currentEmail: string;
+  imageUri: string;
+}) {
+  const extension = imageUri.split('.').pop()?.split('?')[0]?.toLowerCase();
+  const mimeType = extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : 'image/jpeg';
+  const formData = new FormData();
+
+  formData.append('file', {
+    uri: imageUri,
+    name: `profile.${extension || 'jpg'}`,
+    type: mimeType,
+  } as unknown as Blob);
+
+  return requestForm<{ icon_url: string }>('/auth/profile/icon', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'X-Current-Email': currentEmail,
+    },
+    body: formData,
+  });
 }
 
 export async function requestPasswordReset(email: string) {
