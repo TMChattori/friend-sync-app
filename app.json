@@ -10,6 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.tmchattori.friendsyncapp",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "プロフィール画像を選ぶために写真フォルダを使用します。"
       }

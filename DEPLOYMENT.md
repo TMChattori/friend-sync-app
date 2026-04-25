@@ -317,3 +317,88 @@ Render デプロイの次にやると良いもの:
 - 本番 / 開発 / ステージングを分ける
 - CORS を本番向けに整理する
 
+---
+
+## 15. App Store に出す手順
+
+Expo Go ではなく App Store で配布するには、EAS Build / EAS Submit を使います。
+
+### 事前に必要なもの
+
+- Apple Developer Program への登録
+- Expo アカウント
+- App Store Connect に作成するアプリ情報
+- Render の本番 API URL
+
+Apple Developer Program は年額費用が必要です。個人で登録する場合、App Store 上の販売元名にはAppleアカウントの法的氏名が表示されます。
+
+### このプロジェクト側の設定
+
+`app.json` には iOS の Bundle ID を設定済みです。
+
+```json
+"bundleIdentifier": "com.tmchattori.friendsyncapp"
+```
+
+`eas.json` も作成済みです。
+
+### EAS CLI を準備する
+
+```bash
+npm install -g eas-cli
+eas login
+```
+
+### Expo プロジェクトを EAS に紐づける
+
+初回だけ実行します。
+
+```bash
+eas init
+```
+
+### 本番 API URL を EAS に登録する
+
+Render のURLに置き換えて実行します。
+
+```bash
+eas secret:create --scope project --name EXPO_PUBLIC_API_URL --value https://your-render-service.onrender.com
+```
+
+### iOS 本番ビルドを作る
+
+```bash
+eas build --platform ios --profile production
+```
+
+途中で Apple アカウントへのログインや証明書作成を求められたら、EAS に任せて自動作成で進めます。
+
+### App Store Connect に送信する
+
+ビルド完了後に実行します。
+
+```bash
+eas submit --platform ios --profile production
+```
+
+送信後は App Store Connect で以下を入力して審査に出します。
+
+- アプリ名
+- 説明文
+- スクリーンショット
+- カテゴリ
+- 年齢制限
+- プライバシー情報
+- サポートURL
+
+### 今後の更新
+
+コードを修正したら、通常通り GitHub に push してから新しいビルドを作ります。
+
+```bash
+git add .
+git commit -m "Prepare iOS app store build"
+git push origin main
+eas build --platform ios --profile production
+eas submit --platform ios --profile production
+```
