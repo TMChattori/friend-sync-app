@@ -1,25 +1,28 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Alert, Keyboard, KeyboardAvoidingView, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { AvatarBadge } from '@/components/common/avatar-badge';
 import { AppButton } from '@/components/common/app-button';
 import { AppCard } from '@/components/common/app-card';
+import { ErrorText, LoadingText } from '@/components/common/feedback-text';
 import { ScreenHeader, SectionHeader } from '@/components/common/screen-header';
 import { useRegistration } from '@/components/auth/registration-context';
-import { DATE_OPTIONS, SELF_USER_ID, users, type Event } from '@/data/mock-data';
-import { fetchEvents } from '@/services/events-api';
+import { type Event } from '@/data/mock-data';
+import { fetchFriendEvents } from '@/services/events-api';
 import { fetchFriends, type ApiFriend } from '@/services/friends-api';
-import { createInvite } from '@/services/invites-api';
+import { createInvite, fetchSentInvites } from '@/services/invites-api';
 
 type HomeFriendCard = {
   id: string;
   name: string;
   avatar: string;
   userId: string;
+  iconUrl?: string | null;
+  isAvailable: boolean;
 };
 
-const YEAR_OPTIONS = [2026, 2027, 2028];
-const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => index + 1);
 const WHEEL_ITEM_HEIGHT = 52;
+const YEAR_RANGE_RADIUS = 20;
 
 function parseDateParts(date: string) {
   const [year, month, day] = date.split('-').map(Number);
@@ -34,16 +37,53 @@ function buildDateKey(year: number, month: number, day: number) {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
+function formatSelectedDateMeta(date: string) {
+  const parsed = new Date(`${date}T00:00:00`);
+  const weekLabels = ['日', '月', '火', '水', '木', '金', '土'];
+  return `${parsed.getMonth() + 1}/${parsed.getDate()} ${weekLabels[parsed.getDay()]}`;
+}
+
+function getRelativeDateLabel(baseDate: string, candidateDate: string) {
+  const base = new Date(`${baseDate}T00:00:00`);
+  const candidate = new Date(`${candidateDate}T00:00:00`);
+  const diffDays = Math.round((candidate.getTime() - base.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) return '今日';
+  if (diffDays === -1) return '昨日';
+  if (diffDays === 1) return '明日';
+
+  const weekLabels = ['日', '月', '火', '水', '木', '金', '土'];
+  return weekLabels[candidate.getDay()];
+}
+
+function buildDateOptions(centerDate: string) {
+  const base = new Date(`${centerDate}T00:00:00`);
+  return Array.from({ length: 7 }, (_, index) => {
+    const target = new Date(base);
+    target.setDate(base.getDate() + index - 3);
+    const key = buildDateKey(target.getFullYear(), target.getMonth() + 1, target.getDate());
+
+    return {
+      key,
+      label: getRelativeDateLabel(centerDate, key),
+      dayText: formatSelectedDateMeta(key),
+    };
+  });
+}
+
 export function HomeScreenContent() {
   const { authSession } = useRegistration();
-  const initialDateParts = parseDateParts(DATE_OPTIONS[0].key);
-  const [selectedDate, setSelectedDate] = useState(DATE_OPTIONS[0].key);
+  const today = new Date();
+  const initialDateKey = buildDateKey(today.getFullYear(), today.getMonth() + 1, today.getDate());
+  const initialDateParts = parseDateParts(initialDateKey);
+  const [selectedDate, setSelectedDate] = useState(initialDateKey);
+  const [dateWindowCenter, setDateWindowCenter] = useState(initialDateKey);
   const [pickerYear, setPickerYear] = useState(initialDateParts.year);
   const [pickerMonth, setPickerMonth] = useState(initialDateParts.month);
   const [pickerDay, setPickerDay] = useState(initialDateParts.day);
   const [friendSearchText, setFriendSearchText] = useState('');
   const [isDatePickerVisible, setIsDatePickerVisible] = useState(false);
-  const [invitedIds, setInvitedIds] = useState<string[]>([]);
+  const [invitedKeys, setInvitedKeys] = useState<string[]>([]);
   const [inviteTarget, setInviteTarget] = useState<HomeFriendCard | null>(null);
   const [inviteMessage, setInviteMessage] = useState('');
   const [isInviteSubmitting, setIsInviteSubmitting] = useState(false);
@@ -51,13 +91,28 @@ export function HomeScreenContent() {
   const [events, setEvents] = useState<Event[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const yearOptions = useMemo(
+    () => Array.from({ length: YEAR_RANGE_RADIUS * 2 + 1 }, (_, index) => pickerYear - YEAR_RANGE_RADIUS + index),
+    [pickerYear]
+  );
+  const monthOptions = useMemo(() => Array.from({ length: 12 }, (_, index) => index + 1), []);
+  const dayOptions = useMemo(
+    () => Array.from({ length: getDaysInMonth(pickerYear, pickerMonth) }, (_, index) => index + 1),
+    [pickerMonth, pickerYear]
+  );
+  const dateOptions = useMemo(() => buildDateOptions(dateWindowCenter), [dateWindowCenter]);
 
   const loadHomeData = useCallback(async () => {
     try {
       setIsLoading(true);
-      const [apiFriends, apiEvents] = await Promise.all([fetchFriends(authSession), fetchEvents()]);
+      const [apiFriends, apiEvents, sentInvites] = await Promise.all([
+        fetchFriends(authSession),
+        fetchFriendEvents(authSession),
+        fetchSentInvites(authSession),
+      ]);
       setFriends(apiFriends);
       setEvents(apiEvents);
+      setInvitedKeys(sentInvites.map((invite) => `${invite.date}:${invite.to_user_id}`));
       setLoadError(null);
     } catch {
       setLoadError('ホーム画面のデータを取得できませんでした。サーバー接続を確認してください。');
@@ -73,25 +128,19 @@ export function HomeScreenContent() {
   );
 
   const selectedFriends = useMemo(() => {
-    const busyUserIds = new Set(
-      events
-        .filter((event) => event.date === selectedDate)
-        .map((event) => event.userId.toLowerCase())
-    );
+    const busyUserIds = new Set(events.filter((event) => event.date === selectedDate).map((event) => String(event.userId)));
 
-    return friends
-      .map((friend) => {
-        const matchedUser = users.find((user) => user.name === friend.name);
-        const userId = friend.public_user_id ?? matchedUser?.id ?? String(friend.id);
-
-        return {
-          id: String(friend.id),
-          name: friend.name,
-          avatar: friend.name.slice(0, 1),
-          userId,
-        };
-      })
-      .filter((friend) => !busyUserIds.has(friend.userId.toLowerCase()));
+    return friends.map((friend) => {
+      const userId = String(friend.user_db_id ?? friend.id);
+      return {
+        id: String(friend.id),
+        name: friend.name,
+        avatar: friend.name.slice(0, 1),
+        userId,
+        iconUrl: friend.icon_url ?? null,
+        isAvailable: !busyUserIds.has(userId),
+      };
+    });
   }, [events, friends, selectedDate]);
 
   const filteredFriends = useMemo(() => {
@@ -103,11 +152,7 @@ export function HomeScreenContent() {
     return selectedFriends.filter((friend) => friend.name.toLowerCase().includes(keyword));
   }, [friendSearchText, selectedFriends]);
 
-  const selectedDateMeta = DATE_OPTIONS.find((date) => date.key === selectedDate);
-  const dayOptions = useMemo(
-    () => Array.from({ length: getDaysInMonth(pickerYear, pickerMonth) }, (_, index) => index + 1),
-    [pickerMonth, pickerYear]
-  );
+  const selectedDateMeta = formatSelectedDateMeta(selectedDate);
 
   const openDatePicker = () => {
     const parts = parseDateParts(selectedDate);
@@ -119,7 +164,9 @@ export function HomeScreenContent() {
 
   const applyPickedDate = () => {
     const safeDay = Math.min(pickerDay, getDaysInMonth(pickerYear, pickerMonth));
-    setSelectedDate(buildDateKey(pickerYear, pickerMonth, safeDay));
+    const pickedDate = buildDateKey(pickerYear, pickerMonth, safeDay);
+    setSelectedDate(pickedDate);
+    setDateWindowCenter(pickedDate);
     setFriendSearchText('');
     setIsDatePickerVisible(false);
   };
@@ -148,14 +195,18 @@ export function HomeScreenContent() {
 
     try {
       setIsInviteSubmitting(true);
+      if (!authSession?.publicUserId) {
+        throw new Error('current user id is missing');
+      }
       await createInvite({
-        fromUserId: SELF_USER_ID,
+        fromUserId: String(authSession.dbUserId ?? ''),
         toUserId: friend.userId,
         date: selectedDate,
         message,
         status: 'request',
-      });
-      setInvitedIds((current) => (current.includes(friend.id) ? current : [...current, friend.id]));
+      }, authSession);
+      const inviteKey = `${selectedDate}:${friend.userId}`;
+      setInvitedKeys((current) => (current.includes(inviteKey) ? current : [...current, inviteKey]));
       Alert.alert(
         'お誘いを送りました',
         trimmedMessage
@@ -187,7 +238,7 @@ export function HomeScreenContent() {
             </Pressable>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateList}>
-            {DATE_OPTIONS.map((date) => {
+            {dateOptions.map((date) => {
               const active = date.key === selectedDate;
 
               return (
@@ -205,11 +256,11 @@ export function HomeScreenContent() {
       </View>
 
       <View style={styles.listSectionHeader}>
-        <SectionHeader title="空いている友達" meta={selectedDateMeta?.dayText} />
+        <SectionHeader title="友達" meta={selectedDateMeta} />
         <TextInput
           value={friendSearchText}
           onChangeText={setFriendSearchText}
-          placeholder="空いている友達を検索"
+          placeholder="友達を検索"
           placeholderTextColor="#8a97ab"
           style={styles.searchInput}
         />
@@ -217,22 +268,22 @@ export function HomeScreenContent() {
 
       <ScrollView style={styles.friendScroll} contentContainerStyle={styles.friendScrollContent}>
         <View style={styles.section}>
-          {isLoading ? <Text style={styles.loadingText}>友達と予定を読み込み中です...</Text> : null}
-          {loadError ? <Text style={styles.errorText}>{loadError}</Text> : null}
+          {isLoading ? <LoadingText>友達と予定を読み込み中です...</LoadingText> : null}
+          {loadError ? <ErrorText>{loadError}</ErrorText> : null}
 
           {!isLoading && !loadError && filteredFriends.length > 0 ? (
             filteredFriends.map((friend) => {
-              const invited = invitedIds.includes(friend.id);
+              const invited = invitedKeys.includes(`${selectedDate}:${friend.userId}`);
 
               return (
                 <AppCard key={friend.id} style={styles.friendCard}>
                   <View style={styles.friendInfo}>
-                    <View style={styles.avatar}>
-                      <Text style={styles.avatarText}>{friend.avatar}</Text>
-                    </View>
+                    <AvatarBadge label={friend.avatar} imageUrl={friend.iconUrl} size={52} radius={18} />
                     <View style={styles.friendTextBlock}>
                       <Text style={styles.friendName}>{friend.name}</Text>
-                      <Text style={styles.friendStatus}>この日は空いています</Text>
+                      <Text style={[styles.friendStatus, friend.isAvailable ? styles.friendStatusAvailable : styles.friendStatusBusy]}>
+                        {friend.isAvailable ? 'この日は空いてます' : 'この日は空いてません'}
+                      </Text>
                     </View>
                   </View>
 
@@ -252,14 +303,14 @@ export function HomeScreenContent() {
           {!isLoading && (loadError || filteredFriends.length === 0) ? (
             <AppCard style={styles.emptyCard}>
               <Text style={styles.emptyTitle}>
-                {loadError ? '表示できませんでした' : friendSearchText.trim() ? '一致する友達がいません' : 'この日に空いている友達はいません'}
+                {loadError ? '表示できませんでした' : friendSearchText.trim() ? '一致する友達がいません' : '友達がまだいません'}
               </Text>
               <Text style={styles.emptyText}>
                 {loadError
                   ? 'APIサーバーが起動しているか確認してください。'
                   : friendSearchText.trim()
                     ? '検索キーワードを変えてみてください。'
-                    : '別の日付を選ぶと表示されるかもしれません。'}
+                    : '友達画面から友達を追加するとここに表示されます。'}
               </Text>
             </AppCard>
           ) : null}
@@ -325,10 +376,10 @@ export function HomeScreenContent() {
                 showsVerticalScrollIndicator={false}
                 snapToInterval={WHEEL_ITEM_HEIGHT}
                 decelerationRate="fast"
-                contentOffset={{ x: 0, y: Math.max(YEAR_OPTIONS.indexOf(pickerYear), 0) * WHEEL_ITEM_HEIGHT }}
-                onMomentumScrollEnd={(event) => updateWheelValue(event, YEAR_OPTIONS, setPickerYear)}
-                onScrollEndDrag={(event) => updateWheelValue(event, YEAR_OPTIONS, setPickerYear)}>
-                {YEAR_OPTIONS.map((year) => (
+                contentOffset={{ x: 0, y: Math.max(yearOptions.indexOf(pickerYear), 0) * WHEEL_ITEM_HEIGHT }}
+                onMomentumScrollEnd={(event) => updateWheelValue(event, yearOptions, setPickerYear)}
+                onScrollEndDrag={(event) => updateWheelValue(event, yearOptions, setPickerYear)}>
+                {yearOptions.map((year) => (
                   <Pressable key={year} onPress={() => setPickerYear(year)} style={styles.wheelOption}>
                     <Text style={[styles.wheelText, pickerYear === year && styles.wheelTextSelected]}>{year}</Text>
                     <Text style={[styles.wheelUnit, pickerYear === year && styles.wheelTextSelected]}>年</Text>
@@ -341,20 +392,20 @@ export function HomeScreenContent() {
                 showsVerticalScrollIndicator={false}
                 snapToInterval={WHEEL_ITEM_HEIGHT}
                 decelerationRate="fast"
-                contentOffset={{ x: 0, y: Math.max(MONTH_OPTIONS.indexOf(pickerMonth), 0) * WHEEL_ITEM_HEIGHT }}
+                contentOffset={{ x: 0, y: Math.max(monthOptions.indexOf(pickerMonth), 0) * WHEEL_ITEM_HEIGHT }}
                 onMomentumScrollEnd={(event) =>
-                  updateWheelValue(event, MONTH_OPTIONS, (month) => {
+                  updateWheelValue(event, monthOptions, (month) => {
                     setPickerMonth(month);
                     setPickerDay((current) => Math.min(current, getDaysInMonth(pickerYear, month)));
                   })
                 }
                 onScrollEndDrag={(event) =>
-                  updateWheelValue(event, MONTH_OPTIONS, (month) => {
+                  updateWheelValue(event, monthOptions, (month) => {
                     setPickerMonth(month);
                     setPickerDay((current) => Math.min(current, getDaysInMonth(pickerYear, month)));
                   })
                 }>
-                {MONTH_OPTIONS.map((month) => (
+                {monthOptions.map((month) => (
                   <Pressable
                     key={month}
                     onPress={() => {
@@ -464,21 +515,12 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   friendInfo: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 18,
-    backgroundColor: '#e8f0ff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: { fontSize: 20, fontWeight: '800', color: '#1f6fff' },
   friendTextBlock: { flex: 1, gap: 3 },
   friendName: { fontSize: 17, fontWeight: '800', color: '#162033' },
-  friendStatus: { fontSize: 13, color: '#1f9d62', fontWeight: '700' },
+  friendStatus: { fontSize: 13, fontWeight: '700' },
+  friendStatusAvailable: { color: '#1f9d62' },
+  friendStatusBusy: { color: '#d14c73' },
   actionArea: { alignItems: 'flex-end' },
-  loadingText: { fontSize: 13, fontWeight: '700', color: '#6f7f95' },
-  errorText: { fontSize: 13, fontWeight: '700', color: '#d14c73' },
   emptyCard: { padding: 24, alignItems: 'center', gap: 8, borderRadius: 24 },
   emptyTitle: { fontSize: 18, fontWeight: '800', color: '#152033' },
   emptyText: { fontSize: 14, lineHeight: 21, color: '#6f7f95', textAlign: 'center' },

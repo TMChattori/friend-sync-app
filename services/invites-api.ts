@@ -1,4 +1,5 @@
-import { getApiBaseUrl } from '@/services/events-api';
+import { requestJson, requireAuthHeaders } from '@/services/api-client';
+import { type AuthSession } from '@/services/auth-session';
 
 export type ApiInvite = {
   id: string;
@@ -7,6 +8,8 @@ export type ApiInvite = {
   date: string;
   message: string;
   status: 'sent' | 'request' | 'friend_request_sent';
+  from_user_name?: string | null;
+  to_user_name?: string | null;
 };
 
 type InviteCreatePayload = {
@@ -17,29 +20,22 @@ type InviteCreatePayload = {
   status?: ApiInvite['status'];
 };
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-    ...init,
+export function fetchInvites(session: AuthSession | null) {
+  return requestJson<ApiInvite[]>('/invites', {
+    headers: requireAuthHeaders(session),
   });
-
-  if (!response.ok) {
-    throw new Error(`API request failed: ${response.status}`);
-  }
-
-  return response.json() as Promise<T>;
 }
 
-export function fetchInvites() {
-  return request<ApiInvite[]>('/invites');
+export function fetchSentInvites(session: AuthSession | null) {
+  return requestJson<ApiInvite[]>('/invites/sent', {
+    headers: requireAuthHeaders(session),
+  });
 }
 
-export function createInvite(payload: InviteCreatePayload) {
-  return request<ApiInvite>('/invites', {
+export function createInvite(payload: InviteCreatePayload, session: AuthSession | null) {
+  return requestJson<ApiInvite>('/invites', {
     method: 'POST',
+    headers: requireAuthHeaders(session),
     body: JSON.stringify({
       from_user_id: payload.fromUserId,
       to_user_id: payload.toUserId,

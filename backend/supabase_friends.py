@@ -51,13 +51,19 @@ def _request(method: str, path: str, json: dict | None = None) -> list[dict]:
     return data if isinstance(data, list) else [data]
 
 
+def _public_user_id_from_user(row: dict) -> str | None:
+    return row.get("user_id")
+
+
 def _friend_from_relation(relation: dict, users_by_id: dict[int, dict]) -> Friend:
     friend_user_id = int(relation["friend_user_id"])
     user = users_by_id.get(friend_user_id, {})
     return Friend(
         id=int(relation["id"]),
         name=user.get("name") or f"ユーザー{friend_user_id}",
-        public_user_id=user.get("userid"),
+        public_user_id=_public_user_id_from_user(user),
+        user_db_id=friend_user_id,
+        icon_url=user.get("icon_url"),
         status="available",
     )
 
@@ -67,7 +73,7 @@ def _get_users_by_ids(user_ids: list[int]) -> dict[int, dict]:
         return {}
 
     ids = ",".join(str(user_id) for user_id in sorted(set(user_ids)))
-    rows = _request("GET", f"User?select=id,name,userid,note&id=in.({ids})")
+    rows = _request("GET", f"User?select=id,name,user_id,note,icon_url&id=in.({ids})")
     return {int(row["id"]): row for row in rows}
 
 
@@ -75,8 +81,33 @@ def _candidate_from_user(row: dict) -> FriendCandidate:
     return FriendCandidate(
         id=int(row["id"]),
         name=row.get("name") or f"ユーザー{row['id']}",
-        user_id=row.get("userid") or "",
+        user_id=_public_user_id_from_user(row) or "",
         note=row.get("note"),
+    )
+
+
+def _relation_exists(owner_user_id: int, friend_user_id: int) -> bool:
+    rows = _request(
+        "GET",
+        f"Friend?select=id&owner_user_id=eq.{owner_user_id}&friend_user_id=eq.{friend_user_id}&limit=1",
+    )
+    return bool(rows)
+
+
+def _create_relation_if_missing(owner_user_id: int, friend_user_id: int) -> list[dict]:
+    if _relation_exists(owner_user_id, friend_user_id):
+        return _request(
+            "GET",
+            f"Friend?select=id,owner_user_id,friend_user_id,created_at,updated_at&owner_user_id=eq.{owner_user_id}&friend_user_id=eq.{friend_user_id}&limit=1",
+        )
+
+    return _request(
+        "POST",
+        "Friend",
+        {
+            "owner_user_id": owner_user_id,
+            "friend_user_id": friend_user_id,
+        },
     )
 
 
@@ -93,7 +124,7 @@ def search_friend_candidates(name: str, owner_user_id: int) -> list[FriendCandid
     keyword = quote(name.strip(), safe="")
     rows = _request(
         "GET",
-        f"User?select=id,name,userid,note&name=eq.{keyword}&order=id.asc&limit=20",
+        f"User?select=id,name,user_id,note&name=eq.{keyword}&order=id.asc&limit=20",
     )
     return [_candidate_from_user(row) for row in rows if int(row["id"]) != owner_user_id]
 
@@ -102,7 +133,7 @@ def find_friend_candidate_by_public_user_id(public_user_id: str, owner_user_id: 
     keyword = quote(public_user_id.strip(), safe="")
     rows = _request(
         "GET",
-        f"User?select=id,name,userid,note&userid=eq.{keyword}&limit=1",
+        f"User?select=id,name,user_id,note&user_id=eq.{keyword}&limit=1",
     )
     if not rows:
         return None
@@ -118,14 +149,14 @@ def create_friend(payload: FriendCreate, owner_user_id: int) -> Friend:
     friend_user = None
 
     if payload.user_db_id is not None:
-      user_rows = _request("GET", f"User?select=id,name,userid,note&id=eq.{payload.user_db_id}&limit=1")
+      user_rows = _request("GET", f"User?select=id,name,user_id,note,icon_url&id=eq.{payload.user_db_id}&limit=1")
       friend_user = user_rows[0] if user_rows else None
     elif payload.public_user_id:
       candidate = find_friend_candidate_by_public_user_id(payload.public_user_id, owner_user_id)
       friend_user = {
           "id": candidate.id,
           "name": candidate.name,
-          "userid": candidate.user_id,
+          "user_id": candidate.user_id,
           "note": candidate.note,
       } if candidate else None
     elif payload.name:
@@ -134,8 +165,9 @@ def create_friend(payload: FriendCreate, owner_user_id: int) -> Friend:
           friend_user = {
               "id": candidates[0].id,
               "name": candidates[0].name,
-              "userid": candidates[0].user_id,
+              "user_id": candidates[0].user_id,
               "note": candidates[0].note,
+              "icon_url": None,
           }
 
     if not friend_user:
@@ -144,21 +176,11 @@ def create_friend(payload: FriendCreate, owner_user_id: int) -> Friend:
     if int(friend_user["id"]) == owner_user_id:
         raise SupabaseRequestError(400, "You cannot add yourself")
 
-    existing_relations = _request(
-        "GET",
-        f"Friend?select=id&owner_user_id=eq.{owner_user_id}&friend_user_id=eq.{friend_user['id']}&limit=1",
-    )
-    if existing_relations:
+    if _relation_exists(owner_user_id, int(friend_user["id"])):
         raise SupabaseRequestError(409, "Friend already added")
 
-    relation_rows = _request(
-        "POST",
-        "Friend",
-        {
-            "owner_user_id": owner_user_id,
-            "friend_user_id": friend_user["id"],
-        },
-    )
+    relation_rows = _create_relation_if_missing(owner_user_id, int(friend_user["id"]))
+    _create_relation_if_missing(int(friend_user["id"]), owner_user_id)
 
     return _friend_from_relation(relation_rows[0], {int(friend_user["id"]): friend_user})
 

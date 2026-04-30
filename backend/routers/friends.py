@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Header, HTTPException, status
 
 from schemas import Friend, FriendCandidate, FriendCreate
-from supabase_auth import ensure_app_user
+from supabase_auth import get_auth_user, resolve_app_user
 from supabase_events import SupabaseConfigError, SupabaseRequestError
 from supabase_friends import (
     create_friend,
@@ -21,20 +21,21 @@ def _get_bearer_token(authorization: str | None) -> str:
     return authorization[7:].strip()
 
 
-def _get_owner_user_id(authorization: str | None, current_email: str | None, current_user_id: str | None) -> int:
-    _get_bearer_token(authorization)
-
-    if current_user_id:
-        try:
-            return int(current_user_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current user id is invalid") from exc
-
-    if not current_email:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current email is required")
+def _get_owner_user_id(
+    authorization: str | None,
+    current_email: str | None,
+    current_user_id: str | None,
+    current_auth_user_id: str | None,
+) -> int:
+    token = _get_bearer_token(authorization)
 
     try:
-        app_user = ensure_app_user(current_email)
+        auth_user = get_auth_user(token)
+        resolved_email = current_email or auth_user.get("email")
+        if not resolved_email:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current email is required")
+
+        app_user = resolve_app_user(token, resolved_email)
     except SupabaseConfigError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     except SupabaseRequestError as exc:
@@ -48,8 +49,9 @@ def get_friends(
     authorization: str | None = Header(default=None),
     x_current_email: str | None = Header(default=None),
     x_current_user_id: str | None = Header(default=None),
+    x_current_auth_user_id: str | None = Header(default=None),
 ) -> list[Friend]:
-    owner_user_id = _get_owner_user_id(authorization, x_current_email, x_current_user_id)
+    owner_user_id = _get_owner_user_id(authorization, x_current_email, x_current_user_id, x_current_auth_user_id)
 
     try:
         return list_friends(owner_user_id)
@@ -65,8 +67,9 @@ def search_friends(
     authorization: str | None = Header(default=None),
     x_current_email: str | None = Header(default=None),
     x_current_user_id: str | None = Header(default=None),
+    x_current_auth_user_id: str | None = Header(default=None),
 ) -> list[FriendCandidate]:
-    owner_user_id = _get_owner_user_id(authorization, x_current_email, x_current_user_id)
+    owner_user_id = _get_owner_user_id(authorization, x_current_email, x_current_user_id, x_current_auth_user_id)
 
     try:
         return search_friend_candidates(name, owner_user_id)
@@ -82,8 +85,9 @@ def get_friend_by_public_id(
     authorization: str | None = Header(default=None),
     x_current_email: str | None = Header(default=None),
     x_current_user_id: str | None = Header(default=None),
+    x_current_auth_user_id: str | None = Header(default=None),
 ) -> FriendCandidate:
-    owner_user_id = _get_owner_user_id(authorization, x_current_email, x_current_user_id)
+    owner_user_id = _get_owner_user_id(authorization, x_current_email, x_current_user_id, x_current_auth_user_id)
 
     try:
         candidate = find_friend_candidate_by_public_user_id(public_user_id, owner_user_id)
@@ -103,8 +107,9 @@ def post_friend(
     authorization: str | None = Header(default=None),
     x_current_email: str | None = Header(default=None),
     x_current_user_id: str | None = Header(default=None),
+    x_current_auth_user_id: str | None = Header(default=None),
 ) -> Friend:
-    owner_user_id = _get_owner_user_id(authorization, x_current_email, x_current_user_id)
+    owner_user_id = _get_owner_user_id(authorization, x_current_email, x_current_user_id, x_current_auth_user_id)
 
     try:
         return create_friend(payload, owner_user_id)
@@ -120,8 +125,9 @@ def remove_friend(
     authorization: str | None = Header(default=None),
     x_current_email: str | None = Header(default=None),
     x_current_user_id: str | None = Header(default=None),
+    x_current_auth_user_id: str | None = Header(default=None),
 ) -> Friend:
-    owner_user_id = _get_owner_user_id(authorization, x_current_email, x_current_user_id)
+    owner_user_id = _get_owner_user_id(authorization, x_current_email, x_current_user_id, x_current_auth_user_id)
 
     try:
         friend = delete_friend(friend_id, owner_user_id)

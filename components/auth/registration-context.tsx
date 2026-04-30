@@ -1,6 +1,6 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
-import { type AuthSession } from '@/services/auth-api';
+import { type AuthSession } from '@/services/auth-session';
 
 const AUTH_SESSION_STORAGE_KEY = 'friend-sync-auth-session';
 let secureStoreModulePromise: Promise<typeof import('expo-secure-store') | null> | null = null;

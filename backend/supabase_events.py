@@ -1,4 +1,5 @@
 import os
+from urllib.parse import quote
 
 import certifi
 import httpx
@@ -82,25 +83,46 @@ def _payload_for_db(payload: EventCreate | EventUpdate) -> dict:
     return payload.model_dump()
 
 
-def list_events() -> list[Event]:
-    rows = _request("GET", "events?select=*&order=date.asc,start_time.asc")
+def list_events(user_db_id: int) -> list[Event]:
+    encoded_user_id = quote(str(user_db_id), safe="")
+    rows = _request("GET", f"events?select=*&user_id=eq.{encoded_user_id}&order=date.asc,start_time.asc")
     return [_event_from_row(row) for row in rows]
 
 
-def create_event(payload: EventCreate) -> Event:
-    rows = _request("POST", "events", _payload_for_db(payload))
+def list_friend_events(owner_user_id: int) -> list[Event]:
+    relation_rows = _request(
+        "GET",
+        f"Friend?select=friend_user_id&owner_user_id=eq.{owner_user_id}",
+    )
+    friend_user_ids = sorted({str(row["friend_user_id"]) for row in relation_rows if row.get("friend_user_id") is not None})
+    if not friend_user_ids:
+        return []
+
+    encoded_ids = ",".join(friend_user_ids)
+    rows = _request("GET", f"events?select=*&user_id=in.({encoded_ids})&order=date.asc,start_time.asc")
+    return [_event_from_row(row) for row in rows]
+
+
+def create_event(payload: EventCreate, user_db_id: int) -> Event:
+    db_payload = _payload_for_db(payload)
+    db_payload["user_id"] = str(user_db_id)
+    rows = _request("POST", "events", db_payload)
     return _event_from_row(rows[0])
 
 
-def update_event(event_id: str, payload: EventUpdate) -> Event | None:
-    rows = _request("PATCH", f"events?id=eq.{event_id}", _payload_for_db(payload))
+def update_event(event_id: str, payload: EventUpdate, user_db_id: int) -> Event | None:
+    encoded_user_id = quote(str(user_db_id), safe="")
+    db_payload = _payload_for_db(payload)
+    db_payload["user_id"] = str(user_db_id)
+    rows = _request("PATCH", f"events?id=eq.{event_id}&user_id=eq.{encoded_user_id}", db_payload)
     if not rows:
         return None
     return _event_from_row(rows[0])
 
 
-def delete_event(event_id: str) -> Event | None:
-    rows = _request("DELETE", f"events?id=eq.{event_id}")
+def delete_event(event_id: str, user_db_id: int) -> Event | None:
+    encoded_user_id = quote(str(user_db_id), safe="")
+    rows = _request("DELETE", f"events?id=eq.{event_id}&user_id=eq.{encoded_user_id}")
     if not rows:
         return None
     return _event_from_row(rows[0])

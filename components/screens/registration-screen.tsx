@@ -16,7 +16,8 @@ import { useRouter } from 'expo-router';
 import { useRegistration } from '@/components/auth/registration-context';
 import { AppButton } from '@/components/common/app-button';
 import { AppCard } from '@/components/common/app-card';
-import { loginWithEmail, registerWithEmail, requestPasswordReset, type AuthSession } from '@/services/auth-api';
+import { loginWithEmail, registerWithEmail, requestPasswordReset } from '@/services/auth-api';
+import { type AuthSession } from '@/services/auth-session';
 
 type AuthMode = 'login' | 'register';
 

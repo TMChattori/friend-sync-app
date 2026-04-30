@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Keyboard,
@@ -16,17 +16,15 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { useRegistration } from '@/components/auth/registration-context';
 import { AppCard } from '@/components/common/app-card';
 import { AppButton } from '@/components/common/app-button';
-import { Event, getEventsByUserId, SELF_USER_ID, WEEK_LABELS } from '@/data/mock-data';
-import { createEvent, deleteEvent, fetchEvents, getApiBaseUrl, updateEvent } from '@/services/events-api';
+import { Event, WEEK_LABELS } from '@/data/mock-data';
+import { createEvent, deleteEvent, fetchEvents, updateEvent } from '@/services/events-api';
+import { getApiBaseUrl } from '@/services/api-client';
 
 type FormMode = 'create' | 'edit';
 type PickerMode = 'date' | 'startTime' | 'endTime' | null;
-type PickerOption = {
-  label: string;
-  value: string;
-};
 
 type EventCategory = {
   id: string;
@@ -49,7 +47,6 @@ type CalendarMonth = {
 };
 
 const MONTH_NAMES = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
-const CALENDAR_MONTHS = createCalendarMonths(2026);
 const DEFAULT_CATEGORY_ID = 'uncategorized';
 
 const DEFAULT_EVENT_CATEGORIES: EventCategory[] = [
@@ -66,12 +63,67 @@ const CATEGORY_COLOR_OPTIONS = ['#7b8a97', '#51c2d5', '#b9a99f', '#6b39d8', '#d6
 const WHEEL_ITEM_HEIGHT = 52;
 const HOUR_OPTIONS = Array.from({ length: 24 }, (_, index) => index);
 const MINUTE_OPTIONS = Array.from({ length: 6 }, (_, index) => index * 10);
+const YEAR_RANGE_RADIUS = 50;
+const CATEGORY_STORAGE_KEY_PREFIX = 'friend-sync-calendar-categories';
+
+let secureStoreModulePromise: Promise<typeof import('expo-secure-store') | null> | null = null;
+
+async function getSecureStoreModule() {
+  if (Platform.OS === 'web') {
+    return null;
+  }
+
+  if (!secureStoreModulePromise) {
+    secureStoreModulePromise = import('expo-secure-store');
+  }
+
+  return secureStoreModulePromise;
+}
+
+function buildCategoryStorageKey(userKey: string) {
+  const normalizedUserKey = (userKey || 'guest').replace(/[^0-9A-Za-z._-]/g, '_') || 'guest';
+  return `${CATEGORY_STORAGE_KEY_PREFIX}_${normalizedUserKey}`;
+}
+
+async function getStoredCategoryPayload(userKey: string) {
+  const storageKey = buildCategoryStorageKey(userKey);
+  const secureStoreModule = await getSecureStoreModule();
+
+  if (secureStoreModule && typeof secureStoreModule.getItemAsync === 'function') {
+    return secureStoreModule.getItemAsync(storageKey);
+  }
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return window.localStorage.getItem(storageKey);
+  }
+
+  return null;
+}
+
+async function setStoredCategoryPayload(userKey: string, categories: EventCategory[]) {
+  const storageKey = buildCategoryStorageKey(userKey);
+  const payload = JSON.stringify(categories);
+  const secureStoreModule = await getSecureStoreModule();
+
+  if (secureStoreModule && typeof secureStoreModule.setItemAsync === 'function') {
+    await secureStoreModule.setItemAsync(storageKey, payload);
+    return;
+  }
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.localStorage.setItem(storageKey, payload);
+  }
+}
 
 function formatDateKey(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function getTodayDateKey() {
+  return formatDateKey(new Date());
 }
 
 function parseDateKey(date: string) {
@@ -126,22 +178,9 @@ function createCalendarMonths(year: number) {
   return Array.from({ length: 12 }, (_, monthIndex) => createCalendarMonth(year, monthIndex));
 }
 
-function getDateOptionsForMonth(date: string) {
-  const parsed = parseDateKey(date);
-  const month = CALENDAR_MONTHS.find((item) => item.year === parsed.getFullYear() && item.monthIndex === parsed.getMonth());
-
-  if (!month) {
-    return [];
-  }
-
-  return month.days
-    .filter((day) => day.isCurrentMonth)
-    .map((day) => ({ value: day.date, label: `${month.monthIndex + 1}月${day.dayNumber}日` }));
-}
-
 function formatSelectedDate(date: string) {
   const parsed = parseDateKey(date);
-  return `${parsed.getMonth() + 1}月${parsed.getDate()}日`;
+  return `${parsed.getFullYear()}年${parsed.getMonth() + 1}月${parsed.getDate()}日`;
 }
 
 function formatTimeRange(startTime?: string, endTime?: string) {
@@ -177,23 +216,38 @@ function buildTimeValue(hour: number, minute: number) {
 }
 
 export function CalendarScreenContent() {
+  const { authSession } = useRegistration();
   const { width } = useWindowDimensions();
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const currentMonthIndex = today.getMonth();
+  const initialDateKey = getTodayDateKey();
+  const initialDate = parseDateKey(initialDateKey);
+  const scrollViewRef = useRef<ScrollView | null>(null);
+  const monthOffsetsRef = useRef<Record<string, number>>({});
+  const hasInitialScrolledRef = useRef(false);
+  const [monthLayoutVersion, setMonthLayoutVersion] = useState(0);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [events, setEvents] = useState<Event[]>(() => getEventsByUserId(SELF_USER_ID));
+  const [events, setEvents] = useState<Event[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [isFormModalVisible, setIsFormModalVisible] = useState(false);
   const [formMode, setFormMode] = useState<FormMode>('create');
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
-  const [draftDate, setDraftDate] = useState('2026-04-15');
+  const [draftDate, setDraftDate] = useState(initialDateKey);
   const [draftStartTime, setDraftStartTime] = useState('18:00');
   const [draftEndTime, setDraftEndTime] = useState('19:00');
+  const [pickerYear, setPickerYear] = useState(initialDate.getFullYear());
+  const [pickerMonth, setPickerMonth] = useState(initialDate.getMonth() + 1);
+  const [pickerDay, setPickerDay] = useState(initialDate.getDate());
+  const [displayYear, setDisplayYear] = useState(initialDate.getFullYear());
   const [pickerHour, setPickerHour] = useState(18);
   const [pickerMinute, setPickerMinute] = useState(0);
   const [draftTitle, setDraftTitle] = useState('');
   const [draftCategoryId, setDraftCategoryId] = useState(DEFAULT_CATEGORY_ID);
   const [categories, setCategories] = useState<EventCategory[]>(DEFAULT_EVENT_CATEGORIES);
+  const [areCategoriesReady, setAreCategoriesReady] = useState(false);
   const [isCategoryModalVisible, setIsCategoryModalVisible] = useState(false);
   const [isEditingCategories, setIsEditingCategories] = useState(false);
   const gridGap = 6;
@@ -202,22 +256,36 @@ export function CalendarScreenContent() {
   const availableGridWidth = width - screenHorizontalPadding * 2 - calendarHorizontalPadding * 2;
   const dayCellWidth = Math.max(42, Math.floor((availableGridWidth - gridGap * 6) / 7));
   const previewLimit = 4;
+  const currentUserId = authSession?.publicUserId ?? '';
+  const categoryOwnerKey = authSession?.authUserId ?? authSession?.email ?? 'guest';
+  const calendarMonths = useMemo(() => createCalendarMonths(displayYear), [displayYear]);
+  const yearOptions = useMemo(
+    () => Array.from({ length: YEAR_RANGE_RADIUS * 2 + 1 }, (_, index) => currentYear - YEAR_RANGE_RADIUS + index),
+    [currentYear]
+  );
+  const monthOptions = useMemo(() => Array.from({ length: 12 }, (_, index) => index + 1), []);
+  const dayOptions = useMemo(
+    () => Array.from({ length: new Date(pickerYear, pickerMonth, 0).getDate() }, (_, index) => index + 1),
+    [pickerMonth, pickerYear]
+  );
 
   const selectedSchedules = useMemo(
-    () => (selectedDate ? events.filter((event) => event.userId === SELF_USER_ID && event.date === selectedDate) : []),
+    () => (selectedDate ? events.filter((event) => event.date === selectedDate) : []),
     [events, selectedDate]
   );
 
-  const datePickerOptions = useMemo<PickerOption[]>(() => {
-    if (pickerMode === 'date') {
-      return getDateOptionsForMonth(draftDate);
-    }
-
-    return [];
-  }, [draftDate, pickerMode]);
-
   const pickerTitle = pickerMode === 'date' ? '日付を選択' : pickerMode ? '時刻を選択' : '';
   const selectedCategory = getCategoryById(categories, draftCategoryId);
+  const applyPickerValue = () => {
+    if (pickerMode === 'date') {
+      applyDatePickerValue();
+      return;
+    }
+
+    if (pickerMode === 'startTime' || pickerMode === 'endTime') {
+      applyTimePickerValue();
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -225,7 +293,7 @@ export function CalendarScreenContent() {
     const loadEvents = async () => {
       try {
         setIsLoading(true);
-        const apiEvents = await fetchEvents();
+        const apiEvents = await fetchEvents(authSession);
         if (isMounted) {
           setEvents(apiEvents);
           setSyncError(null);
@@ -246,7 +314,68 @@ export function CalendarScreenContent() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [authSession]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadStoredCategories() {
+      setAreCategoriesReady(false);
+      try {
+        const payload = await getStoredCategoryPayload(categoryOwnerKey);
+        if (!payload || !isMounted) {
+          setCategories(DEFAULT_EVENT_CATEGORIES);
+          setAreCategoriesReady(true);
+          return;
+        }
+
+        const parsed = JSON.parse(payload) as EventCategory[];
+        if (!Array.isArray(parsed) || parsed.length === 0) {
+          setCategories(DEFAULT_EVENT_CATEGORIES);
+          setAreCategoriesReady(true);
+          return;
+        }
+
+        setCategories(parsed);
+        setAreCategoriesReady(true);
+      } catch {
+        if (isMounted) {
+          setCategories(DEFAULT_EVENT_CATEGORIES);
+          setAreCategoriesReady(true);
+        }
+      }
+    }
+
+    void loadStoredCategories();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [categoryOwnerKey]);
+
+  useEffect(() => {
+    if (!areCategoriesReady) {
+      return;
+    }
+    void setStoredCategoryPayload(categoryOwnerKey, categories);
+  }, [areCategoriesReady, categories, categoryOwnerKey]);
+
+  useEffect(() => {
+    if (displayYear !== currentYear || hasInitialScrolledRef.current) {
+      return;
+    }
+
+    const targetMonth = calendarMonths[currentMonthIndex];
+    const targetOffset = targetMonth ? monthOffsetsRef.current[targetMonth.key] : undefined;
+    if (targetOffset === undefined || !scrollViewRef.current) {
+      return;
+    }
+
+    hasInitialScrolledRef.current = true;
+    requestAnimationFrame(() => {
+      scrollViewRef.current?.scrollTo({ y: Math.max(targetOffset - 12, 0), animated: false });
+    });
+  }, [calendarMonths, currentMonthIndex, currentYear, displayYear, monthLayoutVersion]);
 
   const closeFormModal = () => {
     Keyboard.dismiss();
@@ -258,9 +387,13 @@ export function CalendarScreenContent() {
   };
 
   const openCreateModalForDate = (targetDate: string) => {
+    const parsed = parseDateKey(targetDate);
     setFormMode('create');
     setEditingEventId(null);
     setDraftDate(targetDate);
+    setPickerYear(parsed.getFullYear());
+    setPickerMonth(parsed.getMonth() + 1);
+    setPickerDay(parsed.getDate());
     setDraftStartTime('18:00');
     setDraftEndTime('19:00');
     setDraftTitle('');
@@ -270,9 +403,13 @@ export function CalendarScreenContent() {
   };
 
   const openEditModal = (event: Event) => {
+    const parsed = parseDateKey(event.date);
     setFormMode('edit');
     setEditingEventId(event.id);
     setDraftDate(event.date);
+    setPickerYear(parsed.getFullYear());
+    setPickerMonth(parsed.getMonth() + 1);
+    setPickerDay(parsed.getDate());
     setDraftStartTime(event.startTime ?? event.time.split(' - ')[0] ?? '18:00');
     setDraftEndTime(event.endTime ?? event.time.split(' - ')[1] ?? '19:00');
     setDraftTitle(event.title);
@@ -304,10 +441,11 @@ export function CalendarScreenContent() {
     setIsEditingCategories(true);
   };
 
-  const applyPickerValue = (value: string) => {
-    if (pickerMode === 'date') {
-      setDraftDate(value);
-    }
+  const applyDatePickerValue = () => {
+    const safeDay = Math.min(pickerDay, new Date(pickerYear, pickerMonth, 0).getDate());
+    setDraftDate(formatDateKey(new Date(pickerYear, pickerMonth - 1, safeDay)));
+    setPickerDay(safeDay);
+    setPickerMode(null);
   };
 
   const openTimePicker = (mode: 'startTime' | 'endTime') => {
@@ -358,16 +496,21 @@ export function CalendarScreenContent() {
       return;
     }
 
+    if (!currentUserId) {
+      Alert.alert('ログイン情報を確認', '再ログインしてから予定を操作してください。');
+      return;
+    }
+
     try {
       if (formMode === 'edit' && editingEventId) {
         const updated = await updateEvent(editingEventId, {
-          userId: SELF_USER_ID,
+          userId: currentUserId,
           date: draftDate,
           title: trimmedTitle,
           startTime: draftStartTime,
           endTime: draftEndTime,
           category: draftCategoryId,
-        });
+        }, authSession);
         setEvents((current) => current.map((event) => (event.id === editingEventId ? updated : event)));
         setSelectedDate(draftDate);
         setSyncError(null);
@@ -377,13 +520,13 @@ export function CalendarScreenContent() {
       }
 
       const created = await createEvent({
-        userId: SELF_USER_ID,
+        userId: currentUserId,
         date: draftDate,
         title: trimmedTitle,
         startTime: draftStartTime,
         endTime: draftEndTime,
         category: draftCategoryId,
-      });
+      }, authSession);
       setEvents((current) => [...current, created]);
       setSelectedDate(draftDate);
       setSyncError(null);
@@ -402,7 +545,7 @@ export function CalendarScreenContent() {
         style: 'destructive',
         onPress: async () => {
           try {
-            await deleteEvent(event.id);
+            await deleteEvent(event.id, authSession);
             setEvents((current) => current.filter((item) => item.id !== event.id));
             Alert.alert('削除しました', '予定を削除しました。');
           } catch {
@@ -415,9 +558,15 @@ export function CalendarScreenContent() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        {CALENDAR_MONTHS.map((month, monthIndex) => (
-          <AppCard key={month.key} style={styles.calendarCard}>
+      <ScrollView ref={scrollViewRef} style={styles.container} contentContainerStyle={styles.content}>
+        {calendarMonths.map((month, monthIndex) => (
+          <AppCard
+            key={month.key}
+            style={styles.calendarCard}
+            onLayout={(event) => {
+              monthOffsetsRef.current[month.key] = event.nativeEvent.layout.y;
+              setMonthLayoutVersion((current) => current + 1);
+            }}>
             <View style={styles.calendarHeader}>
               <View style={styles.calendarHeaderInfo}>
                 <Text style={styles.monthTitle}>{month.title}</Text>
@@ -425,6 +574,17 @@ export function CalendarScreenContent() {
                 {monthIndex === 0 && syncError ? <Text style={styles.syncText}>{syncError}</Text> : null}
                 {monthIndex === 0 && isLoading ? <Text style={styles.syncText}>予定を読み込み中です...</Text> : null}
               </View>
+              {monthIndex === 0 ? (
+                <View style={styles.yearSwitchRow}>
+                  <Pressable onPress={() => setDisplayYear((current) => current - 1)} style={styles.yearSwitchButton}>
+                    <Text style={styles.yearSwitchText}>前年</Text>
+                  </Pressable>
+                  <Text style={styles.yearSwitchLabel}>{displayYear}年</Text>
+                  <Pressable onPress={() => setDisplayYear((current) => current + 1)} style={styles.yearSwitchButton}>
+                    <Text style={styles.yearSwitchText}>翌年</Text>
+                  </Pressable>
+                </View>
+              ) : null}
             </View>
 
             <View style={styles.weekRow}>
@@ -441,7 +601,7 @@ export function CalendarScreenContent() {
                 const isSunday = index % 7 === 0;
                 const isSaturday = index % 7 === 6;
                 const previewSchedules = events
-                  .filter((event) => event.userId === SELF_USER_ID && event.date === day.date)
+                  .filter((event) => event.date === day.date)
                   .slice(0, previewLimit);
 
                 return (
@@ -516,7 +676,7 @@ export function CalendarScreenContent() {
                     </Pressable>
                   </View>
 
-                  <Text style={styles.categorySectionTitle}>Lifebear カレンダー</Text>
+                  <Text style={styles.categorySectionTitle}>カレンダーの色設定</Text>
                   {isEditingCategories ? <Text style={styles.categoryHelpText}>カテゴリー名と色を自由に変更できます。</Text> : null}
                   <ScrollView style={styles.categoryList} contentContainerStyle={styles.categoryListContent}>
                     {categories.map((category) => {
@@ -636,27 +796,86 @@ export function CalendarScreenContent() {
                       <View style={styles.inlinePickerCard}>
                         <View style={styles.inlinePickerHeader}>
                           <Text style={styles.inlinePickerTitle}>{pickerTitle}</Text>
-                          <Pressable onPress={() => setPickerMode(null)}>
-                            <Text style={styles.inlinePickerClose}>閉じる</Text>
-                          </Pressable>
+                          <View style={styles.inlinePickerHeaderActions}>
+                            <Pressable onPress={applyPickerValue}>
+                              <Text style={styles.inlinePickerApply}>決定</Text>
+                            </Pressable>
+                            <Pressable onPress={() => setPickerMode(null)}>
+                              <Text style={styles.inlinePickerClose}>閉じる</Text>
+                            </Pressable>
+                          </View>
                         </View>
                         {pickerMode === 'date' ? (
-                          <ScrollView style={styles.dateWheelList} contentContainerStyle={styles.dateWheelContent} showsVerticalScrollIndicator={false}>
-                            {datePickerOptions.map((option) => {
-                              const isSelected = option.value === draftDate;
-                              return (
-                                <Pressable
-                                  key={option.value}
-                                  onPress={() => {
-                                    applyPickerValue(option.value);
-                                    setPickerMode(null);
-                                  }}
-                                  style={[styles.dateWheelOption, isSelected && styles.dateWheelOptionSelected]}>
-                                  <Text style={[styles.dateWheelOptionText, isSelected && styles.dateWheelOptionTextSelected]}>{option.label}</Text>
-                                </Pressable>
-                              );
-                            })}
-                          </ScrollView>
+                          <>
+                            <View style={styles.timeWheelViewport}>
+                              <View style={styles.timeWheelSelectionBand} pointerEvents="none" />
+                              <ScrollView
+                                style={styles.timeWheelColumn}
+                                contentContainerStyle={styles.timeWheelContent}
+                                showsVerticalScrollIndicator={false}
+                                snapToInterval={WHEEL_ITEM_HEIGHT}
+                                decelerationRate="fast"
+                                contentOffset={{ x: 0, y: Math.max(yearOptions.indexOf(pickerYear), 0) * WHEEL_ITEM_HEIGHT }}
+                                onMomentumScrollEnd={(event) => updateWheelValue(event, yearOptions, setPickerYear)}
+                                onScrollEndDrag={(event) => updateWheelValue(event, yearOptions, setPickerYear)}>
+                                {yearOptions.map((year) => (
+                                  <Pressable key={year} onPress={() => setPickerYear(year)} style={styles.timeWheelOption}>
+                                    <Text style={[styles.timeWheelText, pickerYear === year && styles.timeWheelTextSelected]}>{year}</Text>
+                                  </Pressable>
+                                ))}
+                              </ScrollView>
+                              <ScrollView
+                                style={styles.timeWheelColumn}
+                                contentContainerStyle={styles.timeWheelContent}
+                                showsVerticalScrollIndicator={false}
+                                snapToInterval={WHEEL_ITEM_HEIGHT}
+                                decelerationRate="fast"
+                                contentOffset={{ x: 0, y: Math.max(monthOptions.indexOf(pickerMonth), 0) * WHEEL_ITEM_HEIGHT }}
+                                onMomentumScrollEnd={(event) =>
+                                  updateWheelValue(event, monthOptions, (monthValue) => {
+                                    setPickerMonth(monthValue);
+                                    setPickerDay((current) => Math.min(current, new Date(pickerYear, monthValue, 0).getDate()));
+                                  })
+                                }
+                                onScrollEndDrag={(event) =>
+                                  updateWheelValue(event, monthOptions, (monthValue) => {
+                                    setPickerMonth(monthValue);
+                                    setPickerDay((current) => Math.min(current, new Date(pickerYear, monthValue, 0).getDate()));
+                                  })
+                                }>
+                                {monthOptions.map((monthValue) => (
+                                  <Pressable
+                                    key={monthValue}
+                                    onPress={() => {
+                                      setPickerMonth(monthValue);
+                                      setPickerDay((current) => Math.min(current, new Date(pickerYear, monthValue, 0).getDate()));
+                                    }}
+                                    style={styles.timeWheelOption}>
+                                    <Text style={[styles.timeWheelText, pickerMonth === monthValue && styles.timeWheelTextSelected]}>
+                                      {formatTimePart(monthValue)}
+                                    </Text>
+                                  </Pressable>
+                                ))}
+                              </ScrollView>
+                              <ScrollView
+                                style={styles.timeWheelColumn}
+                                contentContainerStyle={styles.timeWheelContent}
+                                showsVerticalScrollIndicator={false}
+                                snapToInterval={WHEEL_ITEM_HEIGHT}
+                                decelerationRate="fast"
+                                contentOffset={{ x: 0, y: Math.max(dayOptions.indexOf(pickerDay), 0) * WHEEL_ITEM_HEIGHT }}
+                                onMomentumScrollEnd={(event) => updateWheelValue(event, dayOptions, setPickerDay)}
+                                onScrollEndDrag={(event) => updateWheelValue(event, dayOptions, setPickerDay)}>
+                                {dayOptions.map((dayValue) => (
+                                  <Pressable key={dayValue} onPress={() => setPickerDay(dayValue)} style={styles.timeWheelOption}>
+                                    <Text style={[styles.timeWheelText, pickerDay === dayValue && styles.timeWheelTextSelected]}>
+                                      {formatTimePart(dayValue)}
+                                    </Text>
+                                  </Pressable>
+                                ))}
+                              </ScrollView>
+                            </View>
+                          </>
                         ) : (
                           <>
                             <View style={styles.timeWheelViewport}>
@@ -692,10 +911,6 @@ export function CalendarScreenContent() {
                                   </Pressable>
                                 ))}
                               </ScrollView>
-                            </View>
-                            <View style={styles.timePickerActions}>
-                              <AppButton label="キャンセル" variant="secondary" onPress={() => setPickerMode(null)} />
-                              <AppButton label="決定" onPress={applyTimePickerValue} />
                             </View>
                           </>
                         )}
@@ -788,6 +1003,10 @@ const styles = StyleSheet.create({
   monthTitle: { fontSize: 24, fontWeight: '800', color: '#152033' },
   monthMeta: { fontSize: 13, color: '#74829a', marginTop: 4 },
   syncText: { marginTop: 4, fontSize: 12, color: '#6c7a90' },
+  yearSwitchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 },
+  yearSwitchButton: { borderRadius: 999, backgroundColor: '#eef4ff', paddingHorizontal: 12, paddingVertical: 8 },
+  yearSwitchText: { fontSize: 13, fontWeight: '800', color: '#1f6fff' },
+  yearSwitchLabel: { fontSize: 14, fontWeight: '800', color: '#44536a' },
   weekRow: { flexDirection: 'row', marginBottom: 10 },
   weekLabel: { flex: 1, textAlign: 'center', fontSize: 12, fontWeight: '700', color: '#7a879d' },
   sunLabel: { color: '#ef6a6a' },
@@ -902,7 +1121,9 @@ const styles = StyleSheet.create({
   timeField: { flex: 1 },
   inlinePickerCard: { marginTop: 14, borderRadius: 20, backgroundColor: '#f8faff', padding: 14, gap: 10 },
   inlinePickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  inlinePickerHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   inlinePickerTitle: { fontSize: 16, fontWeight: '800', color: '#152033' },
+  inlinePickerApply: { fontSize: 13, fontWeight: '700', color: '#1f6fff' },
   inlinePickerClose: { fontSize: 13, fontWeight: '700', color: '#1f6fff' },
   modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 16 },
   dateWheelList: { maxHeight: 320 },

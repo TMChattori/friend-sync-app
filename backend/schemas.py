@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 
 
 class EventBase(BaseModel):
-    user_id: str = Field(..., description="予定を持つユーザーID")
+    user_id: str | None = Field(default=None, description="予定を持つユーザーID")
     date: str = Field(..., description="予定日。例: 2026-04-15")
     title: str = Field(..., min_length=1, description="予定タイトル")
     start_time: str | None = Field(default=None, description="開始時刻。例: 18:00")
@@ -20,6 +20,7 @@ class EventUpdate(EventBase):
 
 class Event(EventBase):
     id: str = Field(..., description="予定ID")
+    user_id: str = Field(..., description="予定を持つユーザーID")
 
 
 class FriendCreate(BaseModel):
@@ -31,6 +32,7 @@ class FriendCreate(BaseModel):
 class Friend(FriendCreate):
     id: int = Field(..., description="友達ID")
     name: str = Field(..., description="友達の名前")
+    icon_url: str | None = Field(default=None, description="友達アイコンURL")
     status: str = Field(..., description='友達の状態。"available" または "busy"')
 
 
@@ -55,6 +57,8 @@ class InviteCreate(InviteBase):
 
 class Invite(InviteBase):
     id: str = Field(..., description="お誘いID")
+    from_user_name: str | None = Field(default=None, description="誘いを送ったユーザー名")
+    to_user_name: str | None = Field(default=None, description="誘いを受け取るユーザー名")
 
 
 class AuthCredentials(BaseModel):
@@ -78,6 +82,7 @@ class AuthProfileUpdate(BaseModel):
 class AuthSession(BaseModel):
     email: str = Field(..., description="ログイン中のメールアドレス")
     access_token: str | None = Field(default=None, description="Supabase Auth のアクセストークン")
+    auth_user_id: str | None = Field(default=None, description="Supabase Auth のユーザーID")
     db_user_id: int | None = Field(default=None, description="User テーブル上のID")
     username: str | None = Field(default=None, description="表示用ユーザ名")
     public_user_id: str | None = Field(default=None, description="公開ユーザーID")

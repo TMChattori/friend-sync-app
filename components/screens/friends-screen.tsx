@@ -6,13 +6,15 @@ import QRCode from 'react-native-qrcode-svg';
 import { useRegistration } from '@/components/auth/registration-context';
 import { AppButton } from '@/components/common/app-button';
 import { AppCard } from '@/components/common/app-card';
-import { getCurrentUserProfile } from '@/data/mock-data';
+import { AvatarBadge } from '@/components/common/avatar-badge';
+import { ErrorText, LoadingText } from '@/components/common/feedback-text';
+import { fetchAppUserProfile } from '@/services/auth-api';
+import { mergeAuthSession } from '@/services/auth-session';
 import {
   createFriendByDbId,
   deleteFriend,
   fetchFriendCandidateByPublicUserId,
   fetchFriends,
-  searchFriendCandidatesByName,
   type ApiFriend,
   type ApiFriendCandidate,
 } from '@/services/friends-api';
@@ -26,7 +28,7 @@ function normalizeQrId(value: string) {
 }
 
 export function FriendsScreenContent() {
-  const { authSession } = useRegistration();
+  const { authSession, updateAuthSession } = useRegistration();
   const [searchText, setSearchText] = useState('');
   const [isIdModalVisible, setIsIdModalVisible] = useState(false);
   const [isQrModalVisible, setIsQrModalVisible] = useState(false);
@@ -39,16 +41,52 @@ export function FriendsScreenContent() {
   const [isLoadingFriends, setIsLoadingFriends] = useState(true);
   const [friendsError, setFriendsError] = useState<string | null>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  const fallbackProfile = useMemo(() => getCurrentUserProfile(), []);
-  const profile = useMemo(
-    () => ({
-      ...fallbackProfile,
-      name: authSession?.username || fallbackProfile.name,
-      userId: authSession?.publicUserId || fallbackProfile.userId,
-    }),
-    [authSession?.publicUserId, authSession?.username, fallbackProfile]
+  const profileName = authSession?.username?.trim() || '名前未取得';
+  const profileUserId = authSession?.publicUserId?.trim() || 'ID未取得';
+  const profileIconUrl = authSession?.iconUrl ?? null;
+  const myQrValue = useMemo(() => `friendsyncapp://friend?id=${encodeURIComponent(profileUserId)}`, [profileUserId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!authSession?.accessToken || !authSession.email) {
+        return;
+      }
+
+      if (authSession.username && authSession.publicUserId) {
+        return;
+      }
+
+      const accessToken = authSession.accessToken;
+      const currentEmail = authSession.email;
+
+      let isActive = true;
+
+      async function hydrateProfile() {
+        try {
+          const latestSession = await fetchAppUserProfile({
+            accessToken,
+            currentEmail,
+          });
+
+          if (!isActive) {
+            return;
+          }
+
+          if (latestSession.username || latestSession.publicUserId) {
+            updateAuthSession((current) => mergeAuthSession(current, latestSession));
+          }
+        } catch {
+          // 表示の補完だけなので、失敗時は何もしません。
+        }
+      }
+
+      void hydrateProfile();
+
+      return () => {
+        isActive = false;
+      };
+    }, [authSession, updateAuthSession])
   );
-  const myQrValue = useMemo(() => `friendsyncapp://friend?id=${encodeURIComponent(profile.userId)}`, [profile.userId]);
 
   const loadFriends = useCallback(async () => {
     try {
@@ -105,7 +143,9 @@ export function FriendsScreenContent() {
 
   const openFoundFriend = (candidate: ApiFriendCandidate) => {
     const alreadyAdded = friends.some(
-      (friend) => friend.name === candidate.name || friend.public_user_id === candidate.user_id
+      (friend) =>
+        String(friend.user_db_id ?? '') === String(candidate.id) ||
+        ((friend.public_user_id ?? '') && friend.public_user_id === candidate.user_id)
     );
 
     if (alreadyAdded) {
@@ -121,21 +161,16 @@ export function FriendsScreenContent() {
     const keyword = friendIdInput.trim();
 
     if (!keyword) {
-      Alert.alert('名前を入力してください', '追加したい友達の名前を入力してください。');
+      Alert.alert('IDを入力してください', '追加したい友達のユーザIDを入力してください。');
       return;
     }
 
     try {
-      const candidates = await searchFriendCandidatesByName(keyword, authSession);
-      if (candidates.length === 0) {
-        Alert.alert('見つかりませんでした', '一致するユーザー名が見つかりませんでした。');
-        return;
-      }
-
-      openFoundFriend(candidates[0]);
+      const candidate = await fetchFriendCandidateByPublicUserId(keyword, authSession);
+      openFoundFriend(candidate);
       closeIdModal();
     } catch {
-      Alert.alert('検索に失敗', 'サーバー接続を確認してください。');
+      Alert.alert('見つかりませんでした', '一致するユーザIDが見つかりませんでした。');
     }
   };
 
@@ -188,13 +223,19 @@ export function FriendsScreenContent() {
     <SafeAreaView style={styles.safeArea}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         <AppCard style={styles.selfCard}>
-          <View style={styles.selfAvatar}>
-            <Text style={styles.selfAvatarText}>{profile.name.slice(0, 1) || 'U'}</Text>
-          </View>
+          <AvatarBadge
+            label={profileName.slice(0, 1) || 'U'}
+            imageUrl={profileIconUrl}
+            size={56}
+            radius={18}
+            backgroundColor="#1f6fff"
+            textColor="#ffffff"
+            textSize={20}
+          />
           <View style={styles.selfInfo}>
-            <Text style={styles.selfLabel}>あなたの情報</Text>
-            <Text numberOfLines={1} ellipsizeMode="tail" style={styles.selfName}>{profile.name || '名前未設定'}</Text>
-            <Text style={styles.selfId}>ID: {profile.userId || '未設定'}</Text>
+            <Text style={styles.selfLabel}>新規登録した情報</Text>
+            <Text numberOfLines={1} ellipsizeMode="tail" style={styles.selfName}>{profileName}</Text>
+            <Text style={styles.selfId}>ユーザID: {profileUserId}</Text>
           </View>
         </AppCard>
 
@@ -216,19 +257,16 @@ export function FriendsScreenContent() {
             <Text style={styles.sectionTitle}>友達一覧</Text>
             {!isLoadingFriends && !friendsError ? <Text style={styles.friendCount}>{filteredFriends.length}人</Text> : null}
           </View>
-          {friendsError ? <Text style={styles.errorText}>{friendsError}</Text> : null}
-          {isLoadingFriends ? <Text style={styles.loadingText}>友達一覧を読み込み中です...</Text> : null}
+          {friendsError ? <ErrorText>{friendsError}</ErrorText> : null}
+          {isLoadingFriends ? <LoadingText>友達一覧を読み込み中です...</LoadingText> : null}
           <View style={styles.friendList}>
             {!isLoadingFriends && !friendsError && filteredFriends.length > 0 ? (
               filteredFriends.map((friend) => (
                 <AppCard key={friend.id} style={styles.friendCard}>
-                  <View style={styles.avatar}>
-                    <Text style={styles.avatarText}>{friend.name.slice(0, 1)}</Text>
-                  </View>
+                  <AvatarBadge label={friend.name.slice(0, 1)} imageUrl={friend.icon_url} />
                   <View style={styles.friendInfo}>
                     <Text numberOfLines={1} ellipsizeMode="tail" style={styles.friendName}>{friend.name}</Text>
                     <Text style={styles.friendId}>ID: {friend.public_user_id ?? '未設定'}</Text>
-                    <Text style={styles.friendNote}>{friend.status === 'available' ? '今は空いています' : '予定があります'}</Text>
                   </View>
                   <AppButton label="削除" variant="secondary" onPress={() => handleDeleteFriend(friend)} />
                 </AppCard>
@@ -256,14 +294,16 @@ export function FriendsScreenContent() {
       <Modal animationType="fade" transparent visible={isIdModalVisible} onRequestClose={closeIdModal}>
         <Pressable style={styles.modalBackdrop} onPress={closeIdModal}>
           <Pressable style={styles.modalCard} onPress={() => {}}>
-            <Text style={styles.modalTitle}>名前で友達追加</Text>
-            <Text style={styles.modalSubtitle}>友達のユーザ名を入力して、合致するユーザーを検索します。</Text>
+            <Text style={styles.modalTitle}>IDで友達追加</Text>
+            <Text style={styles.modalSubtitle}>友達のユーザIDを入力して、合致するユーザーを検索します。</Text>
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>ユーザ名</Text>
+              <Text style={styles.inputLabel}>ユーザID</Text>
               <TextInput
                 value={friendIdInput}
                 onChangeText={setFriendIdInput}
-                placeholder="例: 山田 健太"
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder="例: hanako_123"
                 placeholderTextColor="#8a97ab"
                 style={styles.modalInput}
               />
@@ -284,9 +324,7 @@ export function FriendsScreenContent() {
                 <Text style={styles.modalTitle}>友達が見つかりました</Text>
                 <Text style={styles.modalSubtitle}>このユーザーを友達一覧に追加しますか？</Text>
                 <View style={styles.foundFriendCard}>
-                  <View style={styles.avatar}>
-                    <Text style={styles.avatarText}>{foundFriend.name.slice(0, 1)}</Text>
-                  </View>
+                  <AvatarBadge label={foundFriend.name.slice(0, 1)} />
                   <View style={styles.friendInfo}>
                     <Text numberOfLines={1} ellipsizeMode="tail" style={styles.friendName}>{foundFriend.name}</Text>
                     <Text style={styles.friendId}>ID: {foundFriend.user_id}</Text>
@@ -341,8 +379,8 @@ export function FriendsScreenContent() {
                 <View style={styles.fakeQr}>
                   <QRCode value={myQrValue} size={164} backgroundColor="#ffffff" color="#152033" />
                 </View>
-                <Text style={styles.myQrName}>{profile.name}</Text>
-                <Text style={styles.myQrId}>ID: {profile.userId}</Text>
+                <Text style={styles.myQrName}>{profileName}</Text>
+                <Text style={styles.myQrId}>ID: {profileUserId}</Text>
                 <Text style={styles.myQrHint}>友達にこのQRを読み取ってもらう想定です。</Text>
               </View>
             )}
@@ -365,15 +403,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f6f7fb' },
   content: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 120, gap: 18 },
   selfCard: { padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  selfAvatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 18,
-    backgroundColor: '#1f6fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  selfAvatarText: { fontSize: 20, fontWeight: '900', color: '#ffffff' },
   selfInfo: { flex: 1, minWidth: 0, gap: 3 },
   selfLabel: { fontSize: 12, fontWeight: '900', color: '#6f7f95' },
   selfName: { fontSize: 19, fontWeight: '900', color: '#152033' },
@@ -401,19 +430,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 999,
   },
-  loadingText: { fontSize: 13, fontWeight: '700', color: '#6f7f95' },
-  errorText: { fontSize: 13, fontWeight: '700', color: '#d14c73' },
   friendList: { gap: 12 },
   friendCard: { padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    backgroundColor: '#e8f0ff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: { fontSize: 18, fontWeight: '800', color: '#1f6fff' },
   friendInfo: { flex: 1, justifyContent: 'center', minWidth: 0 },
   friendName: { fontSize: 17, fontWeight: '800', color: '#152033' },
   friendId: { marginTop: 4, fontSize: 13, fontWeight: '700', color: '#1f6fff' },

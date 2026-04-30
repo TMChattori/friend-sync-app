@@ -1,5 +1,6 @@
-import Constants from 'expo-constants';
 import { Event } from '@/data/mock-data';
+import { requestJson, requireAuthHeaders } from '@/services/api-client';
+import { type AuthSession } from '@/services/auth-session';
 
 type ApiEvent = {
   id: string;
@@ -20,30 +21,6 @@ type EventCreatePayload = {
   category?: string;
 };
 
-export function extractHost(value?: string | null) {
-  if (!value) {
-    return null;
-  }
-
-  const withoutProtocol = value.replace(/^[a-z]+:\/\//i, '');
-  const host = withoutProtocol.split('/')[0]?.split(':')[0];
-  return host || null;
-}
-
-export function getApiBaseUrl() {
-  const envUrl = process.env.EXPO_PUBLIC_API_URL;
-  if (envUrl) {
-    return envUrl;
-  }
-
-  const host =
-    extractHost(Constants.expoConfig?.hostUri) ??
-    extractHost(Constants.linkingUri) ??
-    extractHost(Constants.expoGoConfig?.debuggerHost);
-
-  return host ? `http://${host}:8000` : 'http://127.0.0.1:8000';
-}
-
 function mapApiEvent(event: ApiEvent): Event {
   const startTime = event.start_time ?? undefined;
   const endTime = event.end_time ?? undefined;
@@ -62,30 +39,24 @@ function mapApiEvent(event: ApiEvent): Event {
   };
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-    ...init,
+export async function fetchEvents(session: AuthSession | null) {
+  const events = await requestJson<ApiEvent[]>('/events', {
+    headers: requireAuthHeaders(session),
   });
-
-  if (!response.ok) {
-    throw new Error(`API request failed: ${response.status}`);
-  }
-
-  return response.json() as Promise<T>;
-}
-
-export async function fetchEvents() {
-  const events = await request<ApiEvent[]>('/events');
   return events.map(mapApiEvent);
 }
 
-export async function createEvent(payload: EventCreatePayload) {
-  const event = await request<ApiEvent>('/events', {
+export async function fetchFriendEvents(session: AuthSession | null) {
+  const events = await requestJson<ApiEvent[]>('/events/friends', {
+    headers: requireAuthHeaders(session),
+  });
+  return events.map(mapApiEvent);
+}
+
+export async function createEvent(payload: EventCreatePayload, session: AuthSession | null) {
+  const event = await requestJson<ApiEvent>('/events', {
     method: 'POST',
+    headers: requireAuthHeaders(session),
     body: JSON.stringify({
       user_id: payload.userId,
       date: payload.date,
@@ -99,9 +70,10 @@ export async function createEvent(payload: EventCreatePayload) {
   return mapApiEvent(event);
 }
 
-export async function updateEvent(eventId: string, payload: EventCreatePayload) {
-  const event = await request<ApiEvent>(`/events/${eventId}`, {
+export async function updateEvent(eventId: string, payload: EventCreatePayload, session: AuthSession | null) {
+  const event = await requestJson<ApiEvent>(`/events/${eventId}`, {
     method: 'PUT',
+    headers: requireAuthHeaders(session),
     body: JSON.stringify({
       user_id: payload.userId,
       date: payload.date,
@@ -115,9 +87,10 @@ export async function updateEvent(eventId: string, payload: EventCreatePayload) 
   return mapApiEvent(event);
 }
 
-export async function deleteEvent(eventId: string) {
-  const event = await request<ApiEvent>(`/events/${eventId}`, {
+export async function deleteEvent(eventId: string, session: AuthSession | null) {
+  const event = await requestJson<ApiEvent>(`/events/${eventId}`, {
     method: 'DELETE',
+    headers: requireAuthHeaders(session),
   });
 
   return mapApiEvent(event);

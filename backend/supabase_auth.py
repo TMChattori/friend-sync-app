@@ -101,11 +101,22 @@ def _extension_from_content_type(content_type: str) -> str:
     return "jpg"
 
 
-def upload_profile_icon(current_email: str, content: bytes, content_type: str | None) -> str:
+def _public_user_id_from_user(app_user: dict | None) -> str | None:
+    if not app_user:
+        return None
+    return app_user.get("user_id")
+
+
+def resolve_app_user(access_token: str, current_email: str) -> dict:
+    auth_user = get_auth_user(access_token)
+    return ensure_app_user(str(auth_user["id"]), current_email, auth_user.get("user_metadata", {}).get("username"))
+
+
+def upload_profile_icon_file(access_token: str, current_email: str, content: bytes, content_type: str | None) -> str:
     if not current_email:
         raise SupabaseRequestError(400, "current email is required")
 
-    app_user = ensure_app_user(current_email)
+    app_user = resolve_app_user(access_token, current_email)
     normalized_content_type = content_type if content_type in {"image/jpeg", "image/png", "image/webp"} else "image/jpeg"
     extension = _extension_from_content_type(normalized_content_type)
     object_path = f"user-{app_user['id']}/{uuid4().hex}.{extension}"
@@ -132,13 +143,15 @@ def _session_from_response(
 ) -> AuthSession:
     user = data.get("user") if isinstance(data.get("user"), dict) else data
     email = user.get("email") if isinstance(user, dict) else None
+    auth_user_id = user.get("id") if isinstance(user, dict) else None
 
     return AuthSession(
         email=email or fallback_email,
         access_token=data.get("access_token") or fallback_token,
+        auth_user_id=auth_user_id or (app_user.get("auth_user_id") if app_user else None),
         db_user_id=int(app_user["id"]) if app_user and app_user.get("id") is not None else None,
         username=app_user.get("name") if app_user else None,
-        public_user_id=app_user.get("userid") if app_user else None,
+        public_user_id=_public_user_id_from_user(app_user),
         note=app_user.get("note") if app_user else None,
         icon_url=app_user.get("icon_url") if app_user else None,
         plan_status=app_user.get("plan_status") if app_user and app_user.get("plan_status") else "free",
@@ -159,14 +172,37 @@ def _build_default_name(email: str, username: str | None = None) -> str:
     return local_part[:30] or "新規ユーザー"
 
 
-def ensure_app_user(email: str, username: str | None = None) -> dict:
-    encoded_email = quote(email, safe="")
+def get_auth_user(access_token: str) -> dict:
+    data = _request("GET", "user", access_token=access_token)
+    user = data.get("user") if isinstance(data.get("user"), dict) else data
+    if not isinstance(user, dict) or not user.get("id"):
+        raise SupabaseRequestError(401, "Supabase auth user could not be resolved")
+    return user
+
+
+def ensure_app_user(auth_user_id: str, email: str, username: str | None = None) -> dict:
+    encoded_auth_user_id = quote(auth_user_id, safe="")
     existing_rows = _db_request(
         "GET",
-        f"User?select=id,name,userid,note,icon_url,mailadress,plan_status&mailadress=eq.{encoded_email}&limit=1",
+        f"User?select=id,auth_user_id,name,user_id,note,icon_url,mailadress,plan_status&auth_user_id=eq.{encoded_auth_user_id}&limit=1",
     )
     if existing_rows:
         existing_user = existing_rows[0]
+        display_name = _build_default_name(email, username) if username else None
+        if display_name and existing_user.get("name") != display_name:
+            rows = _db_request("PATCH", f"User?id=eq.{existing_user['id']}", {"name": display_name})
+            return rows[0] if rows else existing_user
+        return existing_user
+
+    # Migration fallback for older rows created before auth_user_id existed.
+    encoded_email = quote(email, safe="")
+    email_rows = _db_request(
+        "GET",
+        f"User?select=id,auth_user_id,name,user_id,note,icon_url,mailadress,plan_status&mailadress=eq.{encoded_email}&limit=1",
+    )
+    if email_rows:
+        rows = _db_request("PATCH", f"User?id=eq.{email_rows[0]['id']}", {"auth_user_id": auth_user_id})
+        existing_user = rows[0] if rows else email_rows[0]
         display_name = _build_default_name(email, username) if username else None
         if display_name and existing_user.get("name") != display_name:
             rows = _db_request("PATCH", f"User?id=eq.{existing_user['id']}", {"name": display_name})
@@ -177,8 +213,9 @@ def ensure_app_user(email: str, username: str | None = None) -> dict:
         "POST",
         "User",
         {
+            "auth_user_id": auth_user_id,
             "name": _build_default_name(email, username),
-            "userid": _build_public_user_id(email),
+            "user_id": _build_public_user_id(email),
             "mailadress": email,
             "plan_status": "free",
         },
@@ -190,18 +227,19 @@ def get_app_user_profile(access_token: str, current_email: str) -> AuthSession:
     if not current_email:
         raise SupabaseRequestError(400, "current email is required")
 
-    app_user = ensure_app_user(current_email)
-    return _session_from_response({}, current_email, access_token, app_user)
+    auth_user = get_auth_user(access_token)
+    app_user = ensure_app_user(str(auth_user["id"]), current_email, auth_user.get("user_metadata", {}).get("username"))
+    return _session_from_response({"user": auth_user}, current_email, access_token, app_user)
 
 
-def sync_app_user_email(current_email: str, new_email: str) -> None:
+def sync_app_user_email(auth_user_id: str, current_email: str, new_email: str) -> None:
     if not current_email or current_email == new_email:
         return
 
-    encoded_current_email = quote(current_email, safe="")
-    rows = _db_request("GET", f"User?select=id,mailadress&mailadress=eq.{encoded_current_email}&limit=1")
+    encoded_auth_user_id = quote(auth_user_id, safe="")
+    rows = _db_request("GET", f"User?select=id,mailadress&auth_user_id=eq.{encoded_auth_user_id}&limit=1")
     if not rows:
-        ensure_app_user(new_email)
+        ensure_app_user(auth_user_id, new_email)
         return
 
     user_id = rows[0]["id"]
@@ -212,7 +250,8 @@ def update_app_user_profile(access_token: str, current_email: str, payload: Auth
     if not current_email:
         raise SupabaseRequestError(400, "current email is required")
 
-    app_user = ensure_app_user(current_email)
+    auth_user = get_auth_user(access_token)
+    app_user = ensure_app_user(str(auth_user["id"]), current_email)
     update_payload: dict[str, str] = {}
 
     if payload.username is not None:
@@ -229,12 +268,12 @@ def update_app_user_profile(access_token: str, current_email: str, payload: Auth
         encoded_public_user_id = quote(public_user_id, safe="")
         existing_rows = _db_request(
             "GET",
-            f"User?select=id&userid=eq.{encoded_public_user_id}&id=neq.{app_user['id']}&limit=1",
+            f"User?select=id&user_id=eq.{encoded_public_user_id}&id=neq.{app_user['id']}&limit=1",
         )
         if existing_rows:
             raise SupabaseRequestError(409, "user_id already exists")
 
-        update_payload["userid"] = public_user_id
+        update_payload["user_id"] = public_user_id
 
     if payload.note is not None:
         note = payload.note.strip()
@@ -247,11 +286,11 @@ def update_app_user_profile(access_token: str, current_email: str, payload: Auth
             update_payload["icon_url"] = icon_url
 
     if not update_payload:
-        return _session_from_response({}, current_email, access_token, app_user)
+        return _session_from_response({"user": auth_user}, current_email, access_token, app_user)
 
     rows = _db_request("PATCH", f"User?id=eq.{app_user['id']}", update_payload)
-    updated_app_user = rows[0] if rows else ensure_app_user(current_email)
-    return _session_from_response({}, current_email, access_token, updated_app_user)
+    updated_app_user = rows[0] if rows else ensure_app_user(str(auth_user["id"]), current_email)
+    return _session_from_response({"user": auth_user}, current_email, access_token, updated_app_user)
 
 
 def register_user(payload: AuthCredentials) -> AuthSession:
@@ -263,7 +302,12 @@ def register_user(payload: AuthCredentials) -> AuthSession:
             "password": payload.password,
         },
     )
-    app_user = ensure_app_user(payload.email, payload.username)
+    auth_user = data.get("user") if isinstance(data.get("user"), dict) else None
+    auth_user_id = str(auth_user["id"]) if isinstance(auth_user, dict) and auth_user.get("id") else None
+    if not auth_user_id:
+        raise SupabaseRequestError(500, "Supabase auth user id is missing from signup response")
+
+    app_user = ensure_app_user(auth_user_id, payload.email, payload.username)
     session = _session_from_response(data, payload.email, app_user=app_user)
 
     if session.access_token:
@@ -284,7 +328,12 @@ def login_user(payload: AuthCredentials) -> AuthSession:
             "password": payload.password,
         },
     )
-    app_user = ensure_app_user(payload.email, payload.username)
+    auth_user = data.get("user") if isinstance(data.get("user"), dict) else None
+    auth_user_id = str(auth_user["id"]) if isinstance(auth_user, dict) and auth_user.get("id") else None
+    if not auth_user_id:
+        raise SupabaseRequestError(500, "Supabase auth user id is missing from login response")
+
+    app_user = ensure_app_user(auth_user_id, payload.email, payload.username)
     return _session_from_response(data, payload.email, app_user=app_user)
 
 
@@ -300,9 +349,11 @@ def update_user(access_token: str, payload: AuthUpdate, current_email: str) -> A
 
     data = _request("PUT", "user", update_payload, access_token)
     updated_email = payload.email or current_email
+    auth_user = get_auth_user(access_token)
+    auth_user_id = str(auth_user["id"])
     if payload.email:
-        sync_app_user_email(current_email, payload.email)
-    app_user = ensure_app_user(updated_email)
+        sync_app_user_email(auth_user_id, current_email, payload.email)
+    app_user = ensure_app_user(auth_user_id, updated_email)
     return _session_from_response(data, updated_email, access_token, app_user)
 
 

@@ -5,10 +5,11 @@ from supabase_auth import (
     get_app_user_profile,
     login_user,
     register_user,
+    resolve_app_user,
     send_password_reset_email,
     update_app_user_profile,
     update_user,
-    upload_profile_icon,
+    upload_profile_icon_file as upload_profile_icon_to_storage,
 )
 from supabase_events import SupabaseConfigError, SupabaseRequestError
 
@@ -115,7 +116,8 @@ async def upload_profile_icon_file(
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="image file is too large")
 
     try:
-        icon_url = upload_profile_icon(x_current_email or "", content, file.content_type)
+        resolve_app_user(_get_bearer_token(authorization), x_current_email or "")
+        icon_url = upload_profile_icon_to_storage(_get_bearer_token(authorization), x_current_email or "", content, file.content_type)
     except SupabaseConfigError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     except SupabaseRequestError as exc:

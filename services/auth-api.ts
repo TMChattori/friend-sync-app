@@ -1,19 +1,10 @@
-import { getApiBaseUrl } from '@/services/events-api';
-
-export type AuthSession = {
-  email: string;
-  accessToken: string | null;
-  dbUserId?: number | null;
-  username?: string | null;
-  publicUserId?: string | null;
-  note?: string | null;
-  iconUrl?: string | null;
-  planStatus?: 'free' | 'premium' | string;
-};
+import { requestForm, requestJson, requireAuthHeaders } from '@/services/api-client';
+import { type AuthSession } from '@/services/auth-session';
 
 type ApiAuthSession = {
   email: string;
   access_token?: string | null;
+  auth_user_id?: string | null;
   db_user_id?: number | null;
   username?: string | null;
   public_user_id?: string | null;
@@ -26,6 +17,7 @@ function mapSession(session: ApiAuthSession): AuthSession {
   return {
     email: session.email,
     accessToken: session.access_token ?? null,
+    authUserId: session.auth_user_id ?? null,
     dbUserId: session.db_user_id ?? null,
     username: session.username ?? null,
     publicUserId: session.public_user_id ?? null,
@@ -35,70 +27,8 @@ function mapSession(session: ApiAuthSession): AuthSession {
   };
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-    ...init,
-  });
-
-  if (!response.ok) {
-    let message = `API request failed: ${response.status}`;
-
-    try {
-      const errorBody = await response.json();
-      const detail = errorBody?.detail;
-
-      if (typeof detail === 'string') {
-        try {
-          const parsedDetail = JSON.parse(detail);
-          message = parsedDetail.msg || parsedDetail.message || parsedDetail.error_description || detail;
-        } catch {
-          message = detail;
-        }
-      } else if (typeof errorBody?.message === 'string') {
-        message = errorBody.message;
-      }
-    } catch {
-      // レスポンス本文がない場合はステータスだけを使います。
-    }
-
-    throw new Error(message);
-  }
-
-  if (response.status === 204) {
-    return undefined as T;
-  }
-
-  return response.json() as Promise<T>;
-}
-
-async function requestForm<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${getApiBaseUrl()}${path}`, init);
-
-  if (!response.ok) {
-    let message = `API request failed: ${response.status}`;
-
-    try {
-      const errorBody = await response.json();
-      const detail = errorBody?.detail;
-      if (typeof detail === 'string') {
-        message = detail;
-      }
-    } catch {
-      // レスポンス本文がない場合はステータスだけを使います。
-    }
-
-    throw new Error(message);
-  }
-
-  return response.json() as Promise<T>;
-}
-
 export async function registerWithEmail(username: string, email: string, password: string) {
-  const session = await request<ApiAuthSession>('/auth/register', {
+  const session = await requestJson<ApiAuthSession>('/auth/register', {
     method: 'POST',
     body: JSON.stringify({ username, email, password }),
   });
@@ -107,7 +37,7 @@ export async function registerWithEmail(username: string, email: string, passwor
 }
 
 export async function loginWithEmail(email: string, password: string) {
-  const session = await request<ApiAuthSession>('/auth/login', {
+  const session = await requestJson<ApiAuthSession>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   });
@@ -126,12 +56,9 @@ export async function updateAuthProfile({
   email?: string;
   password?: string;
 }) {
-  const session = await request<ApiAuthSession>('/auth/me', {
+  const session = await requestJson<ApiAuthSession>('/auth/me', {
     method: 'PUT',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'X-Current-Email': currentEmail,
-    },
+    headers: requireAuthHeaders({ email: currentEmail, accessToken }, {}),
     body: JSON.stringify({
       email: email || null,
       password: password || null,
@@ -148,12 +75,9 @@ export async function fetchAppUserProfile({
   accessToken: string;
   currentEmail: string;
 }) {
-  const session = await request<ApiAuthSession>('/auth/profile', {
+  const session = await requestJson<ApiAuthSession>('/auth/profile', {
     method: 'GET',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'X-Current-Email': currentEmail,
-    },
+    headers: requireAuthHeaders({ email: currentEmail, accessToken }, {}),
   });
 
   return mapSession(session);
@@ -174,12 +98,9 @@ export async function updateAppUserProfile({
   note?: string;
   iconUrl?: string;
 }) {
-  const session = await request<ApiAuthSession>('/auth/profile', {
+  const session = await requestJson<ApiAuthSession>('/auth/profile', {
     method: 'PUT',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'X-Current-Email': currentEmail,
-    },
+    headers: requireAuthHeaders({ email: currentEmail, accessToken }, {}),
     body: JSON.stringify({
       username: username ?? null,
       public_user_id: publicUserId ?? null,
@@ -212,16 +133,13 @@ export async function uploadProfileIcon({
 
   return requestForm<{ icon_url: string }>('/auth/profile/icon', {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'X-Current-Email': currentEmail,
-    },
+    headers: requireAuthHeaders({ email: currentEmail, accessToken }, {}),
     body: formData,
   });
 }
 
 export async function requestPasswordReset(email: string) {
-  await request<void>('/auth/password-reset', {
+  await requestJson<void>('/auth/password-reset', {
     method: 'POST',
     body: JSON.stringify({ email }),
   });
