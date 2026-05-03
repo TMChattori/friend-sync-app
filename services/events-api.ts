@@ -5,7 +5,7 @@ import { type AuthSession } from '@/services/auth-session';
 type ApiEvent = {
   id: string;
   user_id: string;
-  date: string;
+  start_date: string;
   end_date?: string | null;
   title: string;
   start_time?: string | null;
@@ -15,7 +15,7 @@ type ApiEvent = {
 
 type EventCreatePayload = {
   userId: string;
-  date: string;
+  startDate: string;
   endDate?: string;
   title: string;
   startTime?: string;
@@ -31,7 +31,7 @@ function mapApiEvent(event: ApiEvent): Event {
   return {
     id: event.id,
     userId: event.user_id,
-    date: event.date,
+    startDate: event.start_date,
     endDate: event.end_date ?? undefined,
     title: event.title,
     time,
@@ -62,8 +62,8 @@ export async function createEvent(payload: EventCreatePayload, session: AuthSess
     headers: requireAuthHeaders(session),
     body: JSON.stringify({
       user_id: payload.userId,
-      date: payload.date,
-      end_date: payload.endDate ?? payload.date,
+      start_date: payload.startDate,
+      end_date: payload.endDate ?? payload.startDate,
       title: payload.title,
       start_time: payload.startTime ?? null,
       end_time: payload.endTime ?? null,
@@ -80,8 +80,8 @@ export async function updateEvent(eventId: string, payload: EventCreatePayload, 
     headers: requireAuthHeaders(session),
     body: JSON.stringify({
       user_id: payload.userId,
-      date: payload.date,
-      end_date: payload.endDate ?? payload.date,
+      start_date: payload.startDate,
+      end_date: payload.endDate ?? payload.startDate,
       title: payload.title,
       start_time: payload.startTime ?? null,
       end_time: payload.endTime ?? null,

@@ -229,15 +229,15 @@ function buildWeekEventSpans(weekDays: CalendarDayCell[], events: Event[]) {
   const weekStart = weekDays[0].date;
   const weekEnd = weekDays[weekDays.length - 1].date;
   const overlappingEvents = events
-    .filter((event) => isDateWithinRange(weekStart, event.date, event.endDate) || isDateWithinRange(weekEnd, event.date, event.endDate) || isDateWithinRange(event.date, weekStart, weekEnd))
+    .filter((event) => isDateWithinRange(weekStart, event.startDate, event.endDate) || isDateWithinRange(weekEnd, event.startDate, event.endDate) || isDateWithinRange(event.startDate, weekStart, weekEnd))
     .sort((left, right) => {
-      const startCompare = compareDateKeys(left.date, right.date);
+      const startCompare = compareDateKeys(left.startDate, right.startDate);
       if (startCompare !== 0) {
         return startCompare;
       }
 
-      const leftEnd = left.endDate ?? left.date;
-      const rightEnd = right.endDate ?? right.date;
+      const leftEnd = left.endDate ?? left.startDate;
+      const rightEnd = right.endDate ?? right.startDate;
       const endCompare = compareDateKeys(rightEnd, leftEnd);
       if (endCompare !== 0) {
         return endCompare;
@@ -250,12 +250,12 @@ function buildWeekEventSpans(weekDays: CalendarDayCell[], events: Event[]) {
   const spans: CalendarEventSpan[] = [];
 
   for (const event of overlappingEvents) {
-    const effectiveEndDate = event.endDate ?? event.date;
-    const startCol = weekDays.findIndex((day) => isDateWithinRange(day.date, event.date, event.date));
+    const effectiveEndDate = event.endDate ?? event.startDate;
+    const startCol = weekDays.findIndex((day) => isDateWithinRange(day.date, event.startDate, event.startDate));
     const endCol = [...weekDays].reverse().findIndex((day) => isDateWithinRange(day.date, effectiveEndDate, effectiveEndDate));
     const normalizedStartCol = startCol === -1 ? 0 : startCol;
     const normalizedEndCol = endCol === -1 ? weekDays.length - 1 : weekDays.length - 1 - endCol;
-    const startsInWeek = compareDateKeys(event.date, weekStart) >= 0;
+    const startsInWeek = compareDateKeys(event.startDate, weekStart) >= 0;
     const endsInWeek = compareDateKeys(effectiveEndDate, weekEnd) <= 0;
 
     let lane = 0;
@@ -336,7 +336,7 @@ export function CalendarScreenContent() {
   );
 
   const selectedSchedules = useMemo(
-    () => (selectedDate ? events.filter((event) => isDateWithinRange(selectedDate, event.date, event.endDate)) : []),
+    () => (selectedDate ? events.filter((event) => isDateWithinRange(selectedDate, event.startDate, event.endDate)) : []),
     [events, selectedDate]
   );
 
@@ -485,11 +485,11 @@ export function CalendarScreenContent() {
   };
 
   const openEditModal = (event: Event) => {
-    const parsed = parseDateKey(event.date);
+    const parsed = parseDateKey(event.startDate);
     setFormMode('edit');
     setEditingEventId(event.id);
-    setDraftStartDate(event.date);
-    setDraftEndDate(event.endDate ?? event.date);
+    setDraftStartDate(event.startDate);
+    setDraftEndDate(event.endDate ?? event.startDate);
     setPickerYear(parsed.getFullYear());
     setPickerMonth(parsed.getMonth() + 1);
     setPickerDay(parsed.getDate());
@@ -614,7 +614,7 @@ export function CalendarScreenContent() {
       if (formMode === 'edit' && editingEventId) {
         const updated = await updateEvent(editingEventId, {
           userId: currentUserId,
-          date: draftStartDate,
+          startDate: draftStartDate,
           endDate: draftEndDate,
           title: trimmedTitle,
           startTime: draftStartTime,
@@ -631,7 +631,7 @@ export function CalendarScreenContent() {
 
       const created = await createEvent({
         userId: currentUserId,
-        date: draftStartDate,
+        startDate: draftStartDate,
         endDate: draftEndDate,
         title: trimmedTitle,
         startTime: draftStartTime,

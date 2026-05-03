@@ -26,7 +26,7 @@ function buildReminderEntries(events: Event[]) {
   const reminders = new Map<string, Set<string>>();
 
   for (const event of events) {
-    for (const eventDate of enumerateDateRange(event.date, event.endDate)) {
+    for (const eventDate of enumerateDateRange(event.startDate, event.endDate)) {
       const titles = reminders.get(eventDate) ?? new Set<string>();
       titles.add(event.title);
       reminders.set(eventDate, titles);

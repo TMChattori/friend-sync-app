@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 class EventBase(BaseModel):
     user_id: str | None = Field(default=None, description="予定を持つユーザーID")
-    date: str = Field(..., description="予定日。例: 2026-04-15")
+    start_date: str = Field(..., description="開始日。例: 2026-04-15")
     end_date: str | None = Field(default=None, description="終了日。例: 2026-04-18")
     title: str = Field(..., min_length=1, description="予定タイトル")
     start_time: str | None = Field(default=None, description="開始時刻。例: 18:00")

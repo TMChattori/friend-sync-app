@@ -131,7 +131,7 @@ export function HomeScreenContent() {
   const selectedFriends = useMemo(() => {
     const busyUserIds = new Set(
       events
-        .filter((event) => isDateWithinRange(selectedDate, event.date, event.endDate))
+        .filter((event) => isDateWithinRange(selectedDate, event.startDate, event.endDate))
         .map((event) => String(event.userId))
     );
 

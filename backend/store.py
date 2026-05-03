@@ -4,9 +4,9 @@ from schemas import Event, EventCreate, EventUpdate, Friend, FriendCreate
 
 
 events_store: list[Event] = [
-    Event(id="event-1", user_id="mina", date="2026-04-15", title="在宅ワーク集中日", start_time="09:00", end_time="12:00", category="work"),
-    Event(id="event-2", user_id="mina", date="2026-04-15", title="ジム", start_time="18:00", end_time="19:00", category="exercise"),
-    Event(id="event-3", user_id="mio", date="2026-04-16", title="映画", start_time="19:00", end_time="21:00", category="fun"),
+    Event(id="event-1", user_id="mina", start_date="2026-04-15", title="在宅ワーク集中日", start_time="09:00", end_time="12:00", category="work"),
+    Event(id="event-2", user_id="mina", start_date="2026-04-15", title="ジム", start_time="18:00", end_time="19:00", category="exercise"),
+    Event(id="event-3", user_id="mio", start_date="2026-04-16", title="映画", start_time="19:00", end_time="21:00", category="fun"),
 ]
 
 friends_store: list[Friend] = [

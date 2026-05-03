@@ -18,7 +18,7 @@ export type User = {
 export type Event = {
   id: string;
   userId: string;
-  date: string;
+  startDate: string;
   endDate?: string;
   title: string;
   time: string;
@@ -229,33 +229,33 @@ export const friends: FriendRelation[] = [
 ];
 
 export const events: Event[] = [
-  { id: 'self-1', userId: SELF_USER_ID, date: '2026-04-01', title: '家計の見直し', time: '19:30', memo: '今月の固定費を自分用メモに整理' },
-  { id: 'self-2', userId: SELF_USER_ID, date: '2026-04-03', title: '美容院', time: '11:00', memo: '前髪カットも相談する' },
-  { id: 'self-3', userId: SELF_USER_ID, date: '2026-04-03', title: 'ドラッグストアで買い物', time: '18:30', memo: '洗剤と日用品を補充' },
-  { id: 'self-4', userId: SELF_USER_ID, date: '2026-04-12', title: '部屋の片付け', time: '10:00', memo: 'クローゼットを中心に1時間だけ進める' },
-  { id: 'self-5', userId: SELF_USER_ID, date: '2026-04-12', title: 'ネイル予約', time: '14:00', memo: 'デザイン候補を事前に見ておく' },
-  { id: 'self-6', userId: SELF_USER_ID, date: '2026-04-14', title: '歯医者', time: '09:30', memo: '保険証を忘れない' },
-  { id: 'self-7', userId: SELF_USER_ID, date: '2026-04-15', title: '在宅ワーク集中日', time: '09:00', memo: '午前中に企画書の下書きを終える' },
-  { id: 'self-8', userId: SELF_USER_ID, date: '2026-04-15', title: 'ジム', time: '18:00', memo: '脚トレ中心で45分' },
-  { id: 'self-9', userId: SELF_USER_ID, date: '2026-04-15', title: '夜に日記を書く', time: '22:00', memo: '今日の気分を自分用にメモ' },
-  { id: 'self-10', userId: SELF_USER_ID, date: '2026-04-17', title: '病院の定期受診', time: '15:30', memo: '質問したいことを先にまとめる' },
-  { id: 'self-11', userId: SELF_USER_ID, date: '2026-04-20', title: '銀行手続き', time: '12:00', memo: '通帳と本人確認書類を持参' },
-  { id: 'self-12', userId: SELF_USER_ID, date: '2026-04-20', title: '資格勉強', time: '20:00', memo: '問題集を2章ぶん進める' },
-  { id: 'self-13', userId: SELF_USER_ID, date: '2026-04-23', title: '皮膚科', time: '17:00', memo: '薬の残りを確認しておく' },
-  { id: 'self-14', userId: SELF_USER_ID, date: '2026-04-27', title: '洗濯機の掃除', time: '08:30', memo: '洗濯槽クリーナーを使う' },
-  { id: 'self-15', userId: SELF_USER_ID, date: '2026-04-30', title: '月末の振り返り', time: '21:00', memo: '今月よかったことを3つ書く' },
+  { id: 'self-1', userId: SELF_USER_ID, startDate: '2026-04-01', title: '家計の見直し', time: '19:30', memo: '今月の固定費を自分用メモに整理' },
+  { id: 'self-2', userId: SELF_USER_ID, startDate: '2026-04-03', title: '美容院', time: '11:00', memo: '前髪カットも相談する' },
+  { id: 'self-3', userId: SELF_USER_ID, startDate: '2026-04-03', title: 'ドラッグストアで買い物', time: '18:30', memo: '洗剤と日用品を補充' },
+  { id: 'self-4', userId: SELF_USER_ID, startDate: '2026-04-12', title: '部屋の片付け', time: '10:00', memo: 'クローゼットを中心に1時間だけ進める' },
+  { id: 'self-5', userId: SELF_USER_ID, startDate: '2026-04-12', title: 'ネイル予約', time: '14:00', memo: 'デザイン候補を事前に見ておく' },
+  { id: 'self-6', userId: SELF_USER_ID, startDate: '2026-04-14', title: '歯医者', time: '09:30', memo: '保険証を忘れない' },
+  { id: 'self-7', userId: SELF_USER_ID, startDate: '2026-04-15', title: '在宅ワーク集中日', time: '09:00', memo: '午前中に企画書の下書きを終える' },
+  { id: 'self-8', userId: SELF_USER_ID, startDate: '2026-04-15', title: 'ジム', time: '18:00', memo: '脚トレ中心で45分' },
+  { id: 'self-9', userId: SELF_USER_ID, startDate: '2026-04-15', title: '夜に日記を書く', time: '22:00', memo: '今日の気分を自分用にメモ' },
+  { id: 'self-10', userId: SELF_USER_ID, startDate: '2026-04-17', title: '病院の定期受診', time: '15:30', memo: '質問したいことを先にまとめる' },
+  { id: 'self-11', userId: SELF_USER_ID, startDate: '2026-04-20', title: '銀行手続き', time: '12:00', memo: '通帳と本人確認書類を持参' },
+  { id: 'self-12', userId: SELF_USER_ID, startDate: '2026-04-20', title: '資格勉強', time: '20:00', memo: '問題集を2章ぶん進める' },
+  { id: 'self-13', userId: SELF_USER_ID, startDate: '2026-04-23', title: '皮膚科', time: '17:00', memo: '薬の残りを確認しておく' },
+  { id: 'self-14', userId: SELF_USER_ID, startDate: '2026-04-27', title: '洗濯機の掃除', time: '08:30', memo: '洗濯槽クリーナーを使う' },
+  { id: 'self-15', userId: SELF_USER_ID, startDate: '2026-04-30', title: '月末の振り返り', time: '21:00', memo: '今月よかったことを3つ書く' },
 
-  { id: 'mio-1', userId: 'mio', date: '2026-04-11', title: '映画の予定', time: '13:00', memo: '友達と映画館へ' },
-  { id: 'mio-2', userId: 'mio', date: '2026-04-13', title: 'カフェ巡り', time: '15:00', memo: '新しいカフェに行く' },
-  { id: 'mio-3', userId: 'mio', date: '2026-04-16', title: '家族の予定', time: '18:00', memo: '家族で夜ごはん' },
-  { id: 'ren-1', userId: 'ren', date: '2026-04-12', title: 'ランチ予定', time: '12:00', memo: '同僚とランチ' },
-  { id: 'ren-2', userId: 'ren', date: '2026-04-15', title: '用事', time: '17:00', memo: '役所の手続き' },
-  { id: 'yuna-1', userId: 'yuna', date: '2026-04-11', title: '買い物', time: '14:00', memo: 'ショッピングモールへ' },
-  { id: 'yuna-2', userId: 'yuna', date: '2026-04-14', title: '夜ごはん', time: '19:00', memo: '家族で外食' },
-  { id: 'yuna-3', userId: 'yuna', date: '2026-04-16', title: '病院', time: '10:00', memo: '定期受診' },
-  { id: 'sota-1', userId: 'sota', date: '2026-04-13', title: 'ゲーム会', time: '20:00', memo: '友達とオンラインゲーム' },
-  { id: 'sota-2', userId: 'sota', date: '2026-04-14', title: 'ドライブ', time: '09:00', memo: '遠出の予定' },
-  { id: 'sota-3', userId: 'sota', date: '2026-04-17', title: '用事', time: '16:00', memo: '実家に寄る' },
+  { id: 'mio-1', userId: 'mio', startDate: '2026-04-11', title: '映画の予定', time: '13:00', memo: '友達と映画館へ' },
+  { id: 'mio-2', userId: 'mio', startDate: '2026-04-13', title: 'カフェ巡り', time: '15:00', memo: '新しいカフェに行く' },
+  { id: 'mio-3', userId: 'mio', startDate: '2026-04-16', title: '家族の予定', time: '18:00', memo: '家族で夜ごはん' },
+  { id: 'ren-1', userId: 'ren', startDate: '2026-04-12', title: 'ランチ予定', time: '12:00', memo: '同僚とランチ' },
+  { id: 'ren-2', userId: 'ren', startDate: '2026-04-15', title: '用事', time: '17:00', memo: '役所の手続き' },
+  { id: 'yuna-1', userId: 'yuna', startDate: '2026-04-11', title: '買い物', time: '14:00', memo: 'ショッピングモールへ' },
+  { id: 'yuna-2', userId: 'yuna', startDate: '2026-04-14', title: '夜ごはん', time: '19:00', memo: '家族で外食' },
+  { id: 'yuna-3', userId: 'yuna', startDate: '2026-04-16', title: '病院', time: '10:00', memo: '定期受診' },
+  { id: 'sota-1', userId: 'sota', startDate: '2026-04-13', title: 'ゲーム会', time: '20:00', memo: '友達とオンラインゲーム' },
+  { id: 'sota-2', userId: 'sota', startDate: '2026-04-14', title: 'ドライブ', time: '09:00', memo: '遠出の予定' },
+  { id: 'sota-3', userId: 'sota', startDate: '2026-04-17', title: '用事', time: '16:00', memo: '実家に寄る' },
 ];
 
 export const invites: Invite[] = [
@@ -308,7 +308,7 @@ export function getEventsByUserId(userId: string) {
 }
 
 export function getEventsByDate(userId: string, date: string) {
-  return events.filter((event) => event.userId === userId && event.date === date);
+  return events.filter((event) => event.userId === userId && event.startDate === date);
 }
 
 export function getFriendUsers(ownerUserId = SELF_USER_ID): User[] {

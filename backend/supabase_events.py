@@ -59,7 +59,7 @@ def _event_from_row(row: dict) -> Event:
     return Event(
         id=str(row["id"]),
         user_id=str(row["user_id"]),
-        date=row["date"],
+        start_date=row["start_date"],
         end_date=row.get("end_date"),
         title=row["title"],
         start_time=_normalize_time(row.get("start_time")),
@@ -80,7 +80,7 @@ def _payload_for_db(payload: EventCreate | EventUpdate) -> dict:
 
 def list_events(user_db_id: int) -> list[Event]:
     encoded_user_id = quote(str(user_db_id), safe="")
-    rows = _request("GET", f"events?select=*&user_id=eq.{encoded_user_id}&order=date.asc,start_time.asc")
+    rows = _request("GET", f"events?select=*&user_id=eq.{encoded_user_id}&order=start_date.asc,start_time.asc")
     return [_event_from_row(row) for row in rows]
 
 
@@ -94,7 +94,7 @@ def list_friend_events(owner_user_id: int) -> list[Event]:
         return []
 
     encoded_ids = ",".join(friend_user_ids)
-    rows = _request("GET", f"events?select=*&user_id=in.({encoded_ids})&order=date.asc,start_time.asc")
+    rows = _request("GET", f"events?select=*&user_id=in.({encoded_ids})&order=start_date.asc,start_time.asc")
     return [_event_from_row(row) for row in rows]
 
 
