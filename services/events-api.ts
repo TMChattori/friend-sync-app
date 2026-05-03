@@ -6,6 +6,7 @@ type ApiEvent = {
   id: string;
   user_id: string;
   date: string;
+  end_date?: string | null;
   title: string;
   start_time?: string | null;
   end_time?: string | null;
@@ -15,6 +16,7 @@ type ApiEvent = {
 type EventCreatePayload = {
   userId: string;
   date: string;
+  endDate?: string;
   title: string;
   startTime?: string;
   endTime?: string;
@@ -30,6 +32,7 @@ function mapApiEvent(event: ApiEvent): Event {
     id: event.id,
     userId: event.user_id,
     date: event.date,
+    endDate: event.end_date ?? undefined,
     title: event.title,
     time,
     startTime,
@@ -60,6 +63,7 @@ export async function createEvent(payload: EventCreatePayload, session: AuthSess
     body: JSON.stringify({
       user_id: payload.userId,
       date: payload.date,
+      end_date: payload.endDate ?? payload.date,
       title: payload.title,
       start_time: payload.startTime ?? null,
       end_time: payload.endTime ?? null,
@@ -77,6 +81,7 @@ export async function updateEvent(eventId: string, payload: EventCreatePayload, 
     body: JSON.stringify({
       user_id: payload.userId,
       date: payload.date,
+      end_date: payload.endDate ?? payload.date,
       title: payload.title,
       start_time: payload.startTime ?? null,
       end_time: payload.endTime ?? null,

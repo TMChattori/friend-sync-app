@@ -24,7 +24,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 ```bash
 cp backend/.env.example .env
-# .env に SUPABASE_URL / SUPABASE_KEY を設定
+# .env に SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY を設定
 docker compose up --build
 ```
 
@@ -35,6 +35,13 @@ http://localhost:8000
 ```
 
 本番サーバーでは `backend/.env` を置かず、`.env` やサーバー環境変数から値を渡す想定です。
+
+推奨:
+
+- Auth API 用に `SUPABASE_ANON_KEY`
+- REST / Storage 用に `SUPABASE_SERVICE_ROLE_KEY`
+- 本番では `APP_ENV=production`
+- Browser から使う環境では `BACKEND_CORS_ORIGINS` を明示設定
 
 ## ルーティング
 

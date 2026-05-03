@@ -22,9 +22,11 @@ import { AppButton } from '@/components/common/app-button';
 import { Event, WEEK_LABELS } from '@/data/mock-data';
 import { createEvent, deleteEvent, fetchEvents, updateEvent } from '@/services/events-api';
 import { getApiBaseUrl } from '@/services/api-client';
+import { syncTomorrowScheduleReminders } from '@/services/tomorrow-reminders';
+import { compareDateKeys, formatDateKey, formatDateRangeLabel, isDateWithinRange, parseDateKey } from '@/utils/date-range';
 
 type FormMode = 'create' | 'edit';
-type PickerMode = 'date' | 'startTime' | 'endTime' | null;
+type PickerMode = 'startDate' | 'endDate' | 'startTime' | 'endTime' | null;
 
 type EventCategory = {
   id: string;
@@ -46,6 +48,15 @@ type CalendarMonth = {
   days: CalendarDayCell[];
 };
 
+type CalendarEventSpan = {
+  event: Event;
+  lane: number;
+  startCol: number;
+  endCol: number;
+  startsInWeek: boolean;
+  endsInWeek: boolean;
+};
+
 const MONTH_NAMES = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
 const DEFAULT_CATEGORY_ID = 'uncategorized';
 
@@ -65,6 +76,10 @@ const HOUR_OPTIONS = Array.from({ length: 24 }, (_, index) => index);
 const MINUTE_OPTIONS = Array.from({ length: 6 }, (_, index) => index * 10);
 const YEAR_RANGE_RADIUS = 50;
 const CATEGORY_STORAGE_KEY_PREFIX = 'friend-sync-calendar-categories';
+const MAX_VISIBLE_EVENT_LANES = 3;
+const EVENT_BAR_HEIGHT = 16;
+const EVENT_BAR_GAP = 4;
+const EVENT_BAR_TOP = 28;
 
 let secureStoreModulePromise: Promise<typeof import('expo-secure-store') | null> | null = null;
 
@@ -115,20 +130,8 @@ async function setStoredCategoryPayload(userKey: string, categories: EventCatego
   }
 }
 
-function formatDateKey(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
 function getTodayDateKey() {
   return formatDateKey(new Date());
-}
-
-function parseDateKey(date: string) {
-  const [year, month, day] = date.split('-').map(Number);
-  return new Date(year, month - 1, day);
 }
 
 function createCalendarMonth(year: number, monthIndex: number): CalendarMonth {
@@ -178,9 +181,12 @@ function createCalendarMonths(year: number) {
   return Array.from({ length: 12 }, (_, monthIndex) => createCalendarMonth(year, monthIndex));
 }
 
-function formatSelectedDate(date: string) {
-  const parsed = parseDateKey(date);
-  return `${parsed.getFullYear()}年${parsed.getMonth() + 1}月${parsed.getDate()}日`;
+function chunkMonthDays(days: CalendarDayCell[]) {
+  const weeks: CalendarDayCell[][] = [];
+  for (let index = 0; index < days.length; index += 7) {
+    weeks.push(days.slice(index, index + 7));
+  }
+  return weeks;
 }
 
 function formatTimeRange(startTime?: string, endTime?: string) {
@@ -215,6 +221,62 @@ function buildTimeValue(hour: number, minute: number) {
   return `${formatTimePart(hour)}:${formatTimePart(minute)}`;
 }
 
+function buildWeekEventSpans(weekDays: CalendarDayCell[], events: Event[]) {
+  if (weekDays.length === 0) {
+    return [];
+  }
+
+  const weekStart = weekDays[0].date;
+  const weekEnd = weekDays[weekDays.length - 1].date;
+  const overlappingEvents = events
+    .filter((event) => isDateWithinRange(weekStart, event.date, event.endDate) || isDateWithinRange(weekEnd, event.date, event.endDate) || isDateWithinRange(event.date, weekStart, weekEnd))
+    .sort((left, right) => {
+      const startCompare = compareDateKeys(left.date, right.date);
+      if (startCompare !== 0) {
+        return startCompare;
+      }
+
+      const leftEnd = left.endDate ?? left.date;
+      const rightEnd = right.endDate ?? right.date;
+      const endCompare = compareDateKeys(rightEnd, leftEnd);
+      if (endCompare !== 0) {
+        return endCompare;
+      }
+
+      return left.title.localeCompare(right.title, 'ja');
+    });
+
+  const laneBusyUntil = new Map<number, number>();
+  const spans: CalendarEventSpan[] = [];
+
+  for (const event of overlappingEvents) {
+    const effectiveEndDate = event.endDate ?? event.date;
+    const startCol = weekDays.findIndex((day) => isDateWithinRange(day.date, event.date, event.date));
+    const endCol = [...weekDays].reverse().findIndex((day) => isDateWithinRange(day.date, effectiveEndDate, effectiveEndDate));
+    const normalizedStartCol = startCol === -1 ? 0 : startCol;
+    const normalizedEndCol = endCol === -1 ? weekDays.length - 1 : weekDays.length - 1 - endCol;
+    const startsInWeek = compareDateKeys(event.date, weekStart) >= 0;
+    const endsInWeek = compareDateKeys(effectiveEndDate, weekEnd) <= 0;
+
+    let lane = 0;
+    while ((laneBusyUntil.get(lane) ?? -1) >= normalizedStartCol) {
+      lane += 1;
+    }
+
+    laneBusyUntil.set(lane, normalizedEndCol);
+    spans.push({
+      event,
+      lane,
+      startCol: normalizedStartCol,
+      endCol: normalizedEndCol,
+      startsInWeek,
+      endsInWeek,
+    });
+  }
+
+  return spans.filter((span) => span.lane < MAX_VISIBLE_EVENT_LANES);
+}
+
 export function CalendarScreenContent() {
   const { authSession } = useRegistration();
   const { width } = useWindowDimensions();
@@ -235,7 +297,8 @@ export function CalendarScreenContent() {
   const [formMode, setFormMode] = useState<FormMode>('create');
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
-  const [draftDate, setDraftDate] = useState(initialDateKey);
+  const [draftStartDate, setDraftStartDate] = useState(initialDateKey);
+  const [draftEndDate, setDraftEndDate] = useState(initialDateKey);
   const [draftStartTime, setDraftStartTime] = useState('18:00');
   const [draftEndTime, setDraftEndTime] = useState('19:00');
   const [pickerYear, setPickerYear] = useState(initialDate.getFullYear());
@@ -255,7 +318,6 @@ export function CalendarScreenContent() {
   const screenHorizontalPadding = 8;
   const availableGridWidth = width - screenHorizontalPadding * 2 - calendarHorizontalPadding * 2;
   const dayCellWidth = Math.max(42, Math.floor((availableGridWidth - gridGap * 6) / 7));
-  const previewLimit = 4;
   const currentUserId = authSession?.publicUserId ?? '';
   const categoryOwnerKey = authSession?.authUserId ?? authSession?.email ?? 'guest';
   const calendarMonths = useMemo(() => createCalendarMonths(displayYear), [displayYear]);
@@ -268,16 +330,27 @@ export function CalendarScreenContent() {
     () => Array.from({ length: new Date(pickerYear, pickerMonth, 0).getDate() }, (_, index) => index + 1),
     [pickerMonth, pickerYear]
   );
+  const calendarWeeksByMonth = useMemo(
+    () => calendarMonths.map((month) => chunkMonthDays(month.days)),
+    [calendarMonths]
+  );
 
   const selectedSchedules = useMemo(
-    () => (selectedDate ? events.filter((event) => event.date === selectedDate) : []),
+    () => (selectedDate ? events.filter((event) => isDateWithinRange(selectedDate, event.date, event.endDate)) : []),
     [events, selectedDate]
   );
 
-  const pickerTitle = pickerMode === 'date' ? '日付を選択' : pickerMode ? '時刻を選択' : '';
+  const pickerTitle =
+    pickerMode === 'startDate'
+      ? '開始日を選択'
+      : pickerMode === 'endDate'
+        ? '終了日を選択'
+        : pickerMode
+          ? '時刻を選択'
+          : '';
   const selectedCategory = getCategoryById(categories, draftCategoryId);
   const applyPickerValue = () => {
-    if (pickerMode === 'date') {
+    if (pickerMode === 'startDate' || pickerMode === 'endDate') {
       applyDatePickerValue();
       return;
     }
@@ -361,6 +434,14 @@ export function CalendarScreenContent() {
   }, [areCategoriesReady, categories, categoryOwnerKey]);
 
   useEffect(() => {
+    if (!authSession?.accessToken || !authSession.email) {
+      return;
+    }
+
+    void syncTomorrowScheduleReminders(events);
+  }, [authSession, events]);
+
+  useEffect(() => {
     if (displayYear !== currentYear || hasInitialScrolledRef.current) {
       return;
     }
@@ -390,7 +471,8 @@ export function CalendarScreenContent() {
     const parsed = parseDateKey(targetDate);
     setFormMode('create');
     setEditingEventId(null);
-    setDraftDate(targetDate);
+    setDraftStartDate(targetDate);
+    setDraftEndDate(targetDate);
     setPickerYear(parsed.getFullYear());
     setPickerMonth(parsed.getMonth() + 1);
     setPickerDay(parsed.getDate());
@@ -406,7 +488,8 @@ export function CalendarScreenContent() {
     const parsed = parseDateKey(event.date);
     setFormMode('edit');
     setEditingEventId(event.id);
-    setDraftDate(event.date);
+    setDraftStartDate(event.date);
+    setDraftEndDate(event.endDate ?? event.date);
     setPickerYear(parsed.getFullYear());
     setPickerMonth(parsed.getMonth() + 1);
     setPickerDay(parsed.getDate());
@@ -441,9 +524,30 @@ export function CalendarScreenContent() {
     setIsEditingCategories(true);
   };
 
+  const openDatePicker = (mode: 'startDate' | 'endDate') => {
+    const sourceDate = mode === 'startDate' ? draftStartDate : draftEndDate;
+    const parsed = parseDateKey(sourceDate);
+    setPickerYear(parsed.getFullYear());
+    setPickerMonth(parsed.getMonth() + 1);
+    setPickerDay(parsed.getDate());
+    setPickerMode(mode);
+  };
+
   const applyDatePickerValue = () => {
     const safeDay = Math.min(pickerDay, new Date(pickerYear, pickerMonth, 0).getDate());
-    setDraftDate(formatDateKey(new Date(pickerYear, pickerMonth - 1, safeDay)));
+    const nextDate = formatDateKey(new Date(pickerYear, pickerMonth - 1, safeDay));
+    if (pickerMode === 'startDate') {
+      setDraftStartDate(nextDate);
+      if (nextDate > draftEndDate) {
+        setDraftEndDate(nextDate);
+      }
+    }
+    if (pickerMode === 'endDate') {
+      setDraftEndDate(nextDate);
+      if (nextDate < draftStartDate) {
+        setDraftStartDate(nextDate);
+      }
+    }
     setPickerDay(safeDay);
     setPickerMode(null);
   };
@@ -491,6 +595,11 @@ export function CalendarScreenContent() {
       return;
     }
 
+    if (draftStartDate > draftEndDate) {
+      Alert.alert('入力を確認', '終了日は開始日以降にしてください。');
+      return;
+    }
+
     if (draftStartTime >= draftEndTime) {
       Alert.alert('入力を確認', '終了時刻は開始時刻より後にしてください。');
       return;
@@ -505,33 +614,35 @@ export function CalendarScreenContent() {
       if (formMode === 'edit' && editingEventId) {
         const updated = await updateEvent(editingEventId, {
           userId: currentUserId,
-          date: draftDate,
+          date: draftStartDate,
+          endDate: draftEndDate,
           title: trimmedTitle,
           startTime: draftStartTime,
           endTime: draftEndTime,
           category: draftCategoryId,
         }, authSession);
         setEvents((current) => current.map((event) => (event.id === editingEventId ? updated : event)));
-        setSelectedDate(draftDate);
+        setSelectedDate(draftStartDate);
         setSyncError(null);
         closeFormModal();
-        Alert.alert('予定を更新', `${formatSelectedDate(draftDate)} の予定を更新しました`);
+        Alert.alert('予定を更新', `${formatDateRangeLabel(draftStartDate, draftEndDate)} の予定を更新しました`);
         return;
       }
 
       const created = await createEvent({
         userId: currentUserId,
-        date: draftDate,
+        date: draftStartDate,
+        endDate: draftEndDate,
         title: trimmedTitle,
         startTime: draftStartTime,
         endTime: draftEndTime,
         category: draftCategoryId,
       }, authSession);
       setEvents((current) => [...current, created]);
-      setSelectedDate(draftDate);
+      setSelectedDate(draftStartDate);
       setSyncError(null);
       closeFormModal();
-      Alert.alert('予定追加', `${formatSelectedDate(draftDate)} に予定を追加しました`);
+      Alert.alert('予定追加', `${formatDateRangeLabel(draftStartDate, draftEndDate)} に予定を追加しました`);
     } catch {
       Alert.alert('予定保存に失敗', `FastAPI サーバーとの接続を確認してください。\n接続先: ${getApiBaseUrl()}`);
     }
@@ -594,58 +705,75 @@ export function CalendarScreenContent() {
                 </Text>
               ))}
             </View>
-
             <View style={styles.grid}>
-              {month.days.map((day, index) => {
-                const isSelected = day.date === selectedDate;
-                const isSunday = index % 7 === 0;
-                const isSaturday = index % 7 === 6;
-                const previewSchedules = events
-                  .filter((event) => event.date === day.date)
-                  .slice(0, previewLimit);
+              {calendarWeeksByMonth[monthIndex]?.map((weekDays, weekIndex) => {
+                const weekSpans = buildWeekEventSpans(weekDays, events);
+                const weekHeight = dayCellWidth + 54;
 
                 return (
-                  <Pressable
-                    key={day.date}
-                    onPress={() => setSelectedDate(day.date)}
-                    style={[
-                      styles.dayCell,
-                      { width: dayCellWidth, minHeight: dayCellWidth + 52 },
-                      day.isCurrentMonth ? styles.dayCellCurrent : styles.dayCellMuted,
-                      isSelected && styles.dayCellSelected,
-                    ]}>
-                    <Text
-                      style={[
-                        styles.dayNumber,
-                        !day.isCurrentMonth && styles.dayNumberMuted,
-                        isSunday && day.isCurrentMonth && styles.sunText,
-                        isSaturday && day.isCurrentMonth && styles.satText,
-                        isSelected && styles.dayNumberSelected,
-                      ]}>
-                      {day.dayNumber}
-                    </Text>
-                    <View style={styles.previewList}>
-                      {previewSchedules.map((schedule) => (
-                        <View
-                          key={schedule.id}
-                          style={[
-                            styles.previewChip,
-                            { backgroundColor: getCategoryById(categories, schedule.category).color },
-                            isSelected && styles.previewChipSelected,
-                          ]}>
-                          <Text
-                            numberOfLines={1}
-                            ellipsizeMode="tail"
+                  <View key={`${month.key}-week-${weekIndex}`} style={[styles.weekBlock, { height: weekHeight }]}>
+                    <View style={styles.weekCellsRow}>
+                      {weekDays.map((day, dayIndex) => {
+                        const isSelected = day.date === selectedDate;
+                        const isSunday = dayIndex === 0;
+                        const isSaturday = dayIndex === 6;
+
+                        return (
+                          <Pressable
+                            key={day.date}
+                            onPress={() => setSelectedDate(day.date)}
                             style={[
-                              styles.previewChipText,
-                              isSelected && styles.previewChipTextSelected,
+                              styles.dayCell,
+                              { width: dayCellWidth, minHeight: weekHeight },
+                              day.isCurrentMonth ? styles.dayCellCurrent : styles.dayCellMuted,
+                              isSelected && styles.dayCellSelected,
                             ]}>
-                            {schedule.title}
-                          </Text>
-                        </View>
-                      ))}
+                            <Text
+                              style={[
+                                styles.dayNumber,
+                                !day.isCurrentMonth && styles.dayNumberMuted,
+                                isSunday && day.isCurrentMonth && styles.sunText,
+                                isSaturday && day.isCurrentMonth && styles.satText,
+                                isSelected && styles.dayNumberSelected,
+                              ]}>
+                              {day.dayNumber}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
                     </View>
-                  </Pressable>
+
+                    <View pointerEvents="none" style={styles.weekBarsOverlay}>
+                      {weekSpans.map((span) => {
+                        const category = getCategoryById(categories, span.event.category);
+                        const laneTop = EVENT_BAR_TOP + span.lane * (EVENT_BAR_HEIGHT + EVENT_BAR_GAP);
+                        const spanWidth = (span.endCol - span.startCol + 1) * dayCellWidth + (span.endCol - span.startCol) * gridGap - 6;
+                        const left = span.startCol * (dayCellWidth + gridGap) + 3;
+
+                        return (
+                          <View
+                            key={`${span.event.id}-${weekIndex}-${span.lane}`}
+                            style={[
+                              styles.eventSpanBar,
+                              {
+                                top: laneTop,
+                                left,
+                                width: Math.max(spanWidth, dayCellWidth - 6),
+                                backgroundColor: category.color,
+                                borderTopLeftRadius: span.startsInWeek ? 6 : 0,
+                                borderBottomLeftRadius: span.startsInWeek ? 6 : 0,
+                                borderTopRightRadius: span.endsInWeek ? 6 : 0,
+                                borderBottomRightRadius: span.endsInWeek ? 6 : 0,
+                              },
+                            ]}>
+                            <Text numberOfLines={1} ellipsizeMode="tail" style={styles.eventSpanText}>
+                              {span.startsInWeek ? span.event.title : ''}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
                 );
               })}
             </View>
@@ -757,9 +885,17 @@ export function CalendarScreenContent() {
                     </View>
 
                     <View style={styles.formGroup}>
-                      <Text style={styles.formLabel}>日付</Text>
-                      <Pressable style={styles.pickerField} onPress={() => setPickerMode('date')}>
-                        <Text style={styles.pickerFieldText}>{formatSelectedDate(draftDate)}</Text>
+                      <Text style={styles.formLabel}>開始日</Text>
+                      <Pressable style={styles.pickerField} onPress={() => openDatePicker('startDate')}>
+                        <Text style={styles.pickerFieldText}>{formatDateRangeLabel(draftStartDate)}</Text>
+                        <Text style={styles.pickerFieldMeta}>変更</Text>
+                      </Pressable>
+                    </View>
+
+                    <View style={styles.formGroup}>
+                      <Text style={styles.formLabel}>終了日</Text>
+                      <Pressable style={styles.pickerField} onPress={() => openDatePicker('endDate')}>
+                        <Text style={styles.pickerFieldText}>{formatDateRangeLabel(draftEndDate)}</Text>
                         <Text style={styles.pickerFieldMeta}>変更</Text>
                       </Pressable>
                     </View>
@@ -805,7 +941,7 @@ export function CalendarScreenContent() {
                             </Pressable>
                           </View>
                         </View>
-                        {pickerMode === 'date' ? (
+                        {pickerMode === 'startDate' || pickerMode === 'endDate' ? (
                           <>
                             <View style={styles.timeWheelViewport}>
                               <View style={styles.timeWheelSelectionBand} pointerEvents="none" />
@@ -937,7 +1073,7 @@ export function CalendarScreenContent() {
               <>
                 <View style={styles.scheduleHeader}>
                   <View style={styles.scheduleHeaderInfoBlock}>
-                    <Text style={styles.scheduleTitle}>{formatSelectedDate(selectedDate)} の予定</Text>
+                    <Text style={styles.scheduleTitle}>{formatDateRangeLabel(selectedDate)} の予定</Text>
                     <Text style={styles.scheduleMeta}>この一覧は自分だけが見る前提のプライベートな予定メモです。</Text>
                   </View>
                   <View style={styles.scheduleHeaderActions}>
@@ -1011,7 +1147,10 @@ const styles = StyleSheet.create({
   weekLabel: { flex: 1, textAlign: 'center', fontSize: 12, fontWeight: '700', color: '#7a879d' },
   sunLabel: { color: '#ef6a6a' },
   satLabel: { color: '#4e80ff' },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  grid: { gap: 6 },
+  weekBlock: { position: 'relative' },
+  weekCellsRow: { flexDirection: 'row', gap: 6 },
+  weekBarsOverlay: { ...StyleSheet.absoluteFillObject },
   dayCell: {
     borderRadius: 16,
     paddingTop: 8,
@@ -1037,11 +1176,13 @@ const styles = StyleSheet.create({
   dayNumberSelected: { color: '#ffffff' },
   sunText: { color: '#ef6a6a' },
   satText: { color: '#4e80ff' },
-  previewList: { marginTop: 5, gap: 2 },
-  previewChip: { borderRadius: 5, paddingVertical: 1, paddingHorizontal: 3, minHeight: 14, justifyContent: 'center', alignItems: 'center' },
-  previewChipSelected: { backgroundColor: '#dce8ff' },
-  previewChipText: { fontSize: 8, fontWeight: '700', color: '#ffffff', lineHeight: 10, textAlign: 'center', width: '100%' },
-  previewChipTextSelected: { color: '#1f6fff' },
+  eventSpanBar: {
+    position: 'absolute',
+    height: EVENT_BAR_HEIGHT,
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  eventSpanText: { fontSize: 9, fontWeight: '800', color: '#ffffff', lineHeight: 11 },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(21, 32, 51, 0.18)', justifyContent: 'flex-end', padding: 16 },
   formModalWrap: { flex: 1, justifyContent: 'center', paddingVertical: 28 },
   scheduleModalCard: {

@@ -11,6 +11,7 @@ import { type Event } from '@/data/mock-data';
 import { fetchFriendEvents } from '@/services/events-api';
 import { fetchFriends, type ApiFriend } from '@/services/friends-api';
 import { createInvite, fetchSentInvites } from '@/services/invites-api';
+import { isDateWithinRange } from '@/utils/date-range';
 
 type HomeFriendCard = {
   id: string;
@@ -128,7 +129,11 @@ export function HomeScreenContent() {
   );
 
   const selectedFriends = useMemo(() => {
-    const busyUserIds = new Set(events.filter((event) => event.date === selectedDate).map((event) => String(event.userId)));
+    const busyUserIds = new Set(
+      events
+        .filter((event) => isDateWithinRange(selectedDate, event.date, event.endDate))
+        .map((event) => String(event.userId))
+    );
 
     return friends.map((friend) => {
       const userId = String(friend.user_db_id ?? friend.id);

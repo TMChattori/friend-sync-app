@@ -5,18 +5,19 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
+from config import allows_all_cors_origins, get_cors_origins
 from routers.auth import router as auth_router
 from routers.events import router as events_router
 from routers.friends import router as friends_router
 from routers.invites import router as invites_router
 
 app = FastAPI(title="Friend Sync API")
+cors_origins = get_cors_origins()
 
-# Expo から開発中に叩きやすいように、まずは広めに許可しています。
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=not allows_all_cors_origins(cors_origins),
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -19,6 +19,7 @@ export type Event = {
   id: string;
   userId: string;
   date: string;
+  endDate?: string;
   title: string;
   time: string;
   startTime?: string;

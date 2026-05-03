@@ -119,21 +119,22 @@ Render の `Environment` セクションで、以下を設定します。
 
 ### 必須
 
+- `APP_ENV=production`
 - `SUPABASE_URL`
-- `SUPABASE_KEY`
-- `SUPABASE_STORAGE_BUCKET`
-
-### 必要に応じて
-
+- `SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
+- `SUPABASE_STORAGE_BUCKET`
+- `BACKEND_CORS_ORIGINS`
 
 例:
 
 ```env
+APP_ENV=production
 SUPABASE_URL=https://your-project-id.supabase.co
-SUPABASE_KEY=your-supabase-key
-SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_ANON_KEY=your-supabase-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
 SUPABASE_STORAGE_BUCKET=profile-icons
+BACKEND_CORS_ORIGINS=https://your-frontend.example.com
 ```
 
 ---
@@ -200,6 +201,7 @@ EXPO_PUBLIC_API_URL=https://friend-sync-backend.onrender.com
 補足:
 
 - iPhone / Expo Go から Render を叩く場合、ローカルIP指定ではなくこの Render URL を使います
+- ローカル確認用には `.env.example` をコピーして `.env` を作ると管理しやすいです
 
 ---
 
@@ -219,13 +221,19 @@ API URL を Render に切り替えたあと、次を確認します。
 
 ## 11. CORS の見直し
 
-今の `backend/main.py` は開発向けに広く許可しています。
+今の backend は、`BACKEND_CORS_ORIGINS` が未設定なら開発向けに広く許可します。
 
 ```python
 allow_origins=["*"]
 ```
 
-Render で本番運用する場合は、将来的に絞るのがおすすめです。
+Render で本番運用する場合は、`BACKEND_CORS_ORIGINS` に必要な Origin だけを明示するのがおすすめです。
+
+例:
+
+```env
+BACKEND_CORS_ORIGINS=https://your-frontend.example.com,https://preview.example.com
+```
 
 ただし Expo 開発中は接続元が固定しづらいので、最初は `*` のままでも進めやすいです。
 
@@ -246,7 +254,8 @@ Render で本番運用する場合は、将来的に絞るのがおすすめで�
 原因候補:
 
 - `SUPABASE_URL` が違う
-- `SUPABASE_KEY` が違う
+- `SUPABASE_ANON_KEY` が違う
+- `SUPABASE_SERVICE_ROLE_KEY` が違う
 - テーブルが未作成
 
 ### 3. Expo からつながらない
@@ -291,9 +300,10 @@ uvicorn main:app --host 0.0.0.0 --port $PORT
 
 - Environment Variables:
   - `SUPABASE_URL`
-  - `SUPABASE_KEY`
+  - `SUPABASE_ANON_KEY`
   - `SUPABASE_SERVICE_ROLE_KEY`
   - `SUPABASE_STORAGE_BUCKET`
+  - `BACKEND_CORS_ORIGINS`
 
 ### Expo 側
 
@@ -313,7 +323,26 @@ Render デプロイの次にやると良いもの:
 
 ---
 
-## 15. Supabase Userプロフィール設定
+## 15. Supabase RLS の見直し
+
+本番公開前に、少なくとも次のテーブルは Row Level Security を有効化するのがおすすめです。
+
+- `User`
+  - 他人のプロフィール更新を防ぐ
+- `Friend`
+  - 他人の友達関係の作成 / 削除 / 閲覧を防ぐ
+- `events`
+  - 自分の予定だけを更新 / 削除できるようにする
+- `invites`
+  - 自分が送った invite と自分宛て invite だけを扱えるようにする
+
+補足:
+
+- この backend は server-side から Supabase を呼ぶ実装なので、`SUPABASE_SERVICE_ROLE_KEY` を使う処理は RLS を迂回できます
+- それでも RLS は「誤って anon key や client key で直接触られた時の保険」として有効です
+- `profile-icons` bucket にも Storage Policy を設定し、アップロード / 公開範囲を見直すのがおすすめです
+
+## 16. Supabase Userプロフィール設定
 
 設定画面では `User` テーブルの以下のカラムを参照・更新します。
 
@@ -347,7 +376,7 @@ SUPABASE_STORAGE_BUCKET=profile-icons
 
 ---
 
-## 16. App Store に出す手順
+## 17. App Store に出す手順
 
 Expo Go ではなく App Store で配布するには、EAS Build / EAS Submit を使います。
 

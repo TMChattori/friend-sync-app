@@ -1,29 +1,23 @@
-import os
 from urllib.parse import quote
 
 import certifi
 import httpx
-from dotenv import load_dotenv
 
+from config import SUPABASE_URL, get_admin_key
 from schemas import Friend, FriendCandidate, FriendCreate
 from supabase_events import SupabaseConfigError, SupabaseRequestError
 
 
-load_dotenv()
-
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
-
-
 def _ensure_config() -> None:
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        raise SupabaseConfigError("SUPABASE_URL and SUPABASE_KEY are required in backend/.env")
+    if not SUPABASE_URL or not get_admin_key():
+        raise SupabaseConfigError("SUPABASE_URL and a backend Supabase key are required")
 
 
 def _headers() -> dict[str, str]:
+    admin_key = get_admin_key()
     return {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "apikey": admin_key,
+        "Authorization": f"Bearer {admin_key}",
         "Content-Type": "application/json",
         "Accept": "application/json",
         "Prefer": "return=representation",
