@@ -5,13 +5,12 @@ import { AvatarBadge } from '@/components/common/avatar-badge';
 import { AppButton } from '@/components/common/app-button';
 import { AppCard } from '@/components/common/app-card';
 import { ErrorText, LoadingText } from '@/components/common/feedback-text';
-import { ScreenHeader, SectionHeader } from '@/components/common/screen-header';
+import { SectionHeader } from '@/components/common/screen-header';
+import { TopBannerAd } from '@/components/common/top-banner-ad';
 import { useRegistration } from '@/components/auth/registration-context';
-import { type Event } from '@/data/mock-data';
-import { fetchFriendEvents } from '@/services/events-api';
-import { fetchFriends, type ApiFriend } from '@/services/friends-api';
+import { fetchAvailableFriends, type ApiFriend } from '@/services/friends-api';
 import { createInvite, fetchSentInvites } from '@/services/invites-api';
-import { isDateWithinRange } from '@/utils/date-range';
+import { readCachedJson, writeCachedJson } from '@/services/local-cache';
 
 type HomeFriendCard = {
   id: string;
@@ -89,9 +88,11 @@ export function HomeScreenContent() {
   const [inviteMessage, setInviteMessage] = useState('');
   const [isInviteSubmitting, setIsInviteSubmitting] = useState(false);
   const [friends, setFriends] = useState<ApiFriend[]>([]);
-  const [events, setEvents] = useState<Event[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isShowingCachedData, setIsShowingCachedData] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const dataCacheScope = authSession?.authUserId ?? authSession?.email ?? 'guest';
   const yearOptions = useMemo(
     () => Array.from({ length: YEAR_RANGE_RADIUS * 2 + 1 }, (_, index) => pickerYear - YEAR_RANGE_RADIUS + index),
     [pickerYear]
@@ -104,23 +105,45 @@ export function HomeScreenContent() {
   const dateOptions = useMemo(() => buildDateOptions(dateWindowCenter), [dateWindowCenter]);
 
   const loadHomeData = useCallback(async () => {
+    const [cachedFriends, cachedEvents] = await Promise.all([
+      readCachedJson<ApiFriend[]>(`available-friends-${selectedDate}`, dataCacheScope),
+      readCachedJson<string[]>('sent-invites', dataCacheScope),
+    ]);
+
+    if ((cachedFriends?.length ?? 0) > 0 || (cachedEvents?.length ?? 0) > 0) {
+      setFriends(cachedFriends ?? []);
+      setInvitedKeys(cachedEvents ?? []);
+      setLoadError(null);
+      setIsShowingCachedData(true);
+      setIsLoading(false);
+    }
+
     try {
-      setIsLoading(true);
-      const [apiFriends, apiEvents, sentInvites] = await Promise.all([
-        fetchFriends(authSession),
-        fetchFriendEvents(authSession),
+      setIsLoading(!(cachedFriends?.length || cachedEvents?.length));
+      setIsRefreshing(!!(cachedFriends?.length || cachedEvents?.length));
+      const [apiFriends, sentInvites] = await Promise.all([
+        fetchAvailableFriends(selectedDate, authSession),
         fetchSentInvites(authSession),
       ]);
       setFriends(apiFriends);
-      setEvents(apiEvents);
       setInvitedKeys(sentInvites.map((invite) => `${invite.date}:${invite.to_user_id}`));
       setLoadError(null);
+      setIsShowingCachedData(false);
+      await Promise.all([
+        writeCachedJson(`available-friends-${selectedDate}`, dataCacheScope, apiFriends),
+        writeCachedJson('sent-invites', dataCacheScope, sentInvites.map((invite) => `${invite.date}:${invite.to_user_id}`)),
+      ]);
     } catch {
-      setLoadError('ホーム画面のデータを取得できませんでした。サーバー接続を確認してください。');
+      setLoadError(
+        cachedFriends?.length || cachedEvents?.length
+          ? '前回の一覧を表示しています。最新情報の取得に失敗しました。'
+          : 'ホーム画面のデータを取得できませんでした。サーバー接続を確認してください。'
+      );
     } finally {
       setIsLoading(false);
+      setIsRefreshing(false);
     }
-  }, [authSession]);
+  }, [authSession, dataCacheScope, selectedDate]);
 
   useFocusEffect(
     useCallback(() => {
@@ -128,25 +151,21 @@ export function HomeScreenContent() {
     }, [loadHomeData])
   );
 
-  const selectedFriends = useMemo(() => {
-    const busyUserIds = new Set(
-      events
-        .filter((event) => isDateWithinRange(selectedDate, event.startDate, event.endDate))
-        .map((event) => String(event.userId))
-    );
-
-    return friends.map((friend) => {
-      const userId = String(friend.user_db_id ?? friend.id);
-      return {
-        id: String(friend.id),
-        name: friend.name,
-        avatar: friend.name.slice(0, 1),
-        userId,
-        iconUrl: friend.icon_url ?? null,
-        isAvailable: !busyUserIds.has(userId),
-      };
-    });
-  }, [events, friends, selectedDate]);
+  const selectedFriends = useMemo(
+    () =>
+      friends.map((friend) => {
+        const userId = String(friend.user_db_id ?? friend.id);
+        return {
+          id: String(friend.id),
+          name: friend.name,
+          avatar: friend.name.slice(0, 1),
+          userId,
+          iconUrl: friend.icon_url ?? null,
+          isAvailable: friend.status === 'available',
+        };
+      }),
+    [friends]
+  );
 
   const filteredFriends = useMemo(() => {
     const keyword = friendSearchText.trim().toLowerCase();
@@ -229,11 +248,7 @@ export function HomeScreenContent() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.fixedContent}>
-        <ScreenHeader
-          eyebrow="Friend Sync"
-          title="空いている友達を見つけよう"
-          subtitle="日付を選ぶと、その日に空いている友達だけを表示します。"
-        />
+        <TopBannerAd />
 
         <View style={styles.section}>
           <View style={styles.dateHeaderRow}>
@@ -273,6 +288,8 @@ export function HomeScreenContent() {
 
       <ScrollView style={styles.friendScroll} contentContainerStyle={styles.friendScrollContent}>
         <View style={styles.section}>
+          {isShowingCachedData ? <LoadingText>前回の一覧を先に表示しています。</LoadingText> : null}
+          {isRefreshing ? <LoadingText>最新の友達と予定を更新中です...</LoadingText> : null}
           {isLoading ? <LoadingText>友達と予定を読み込み中です...</LoadingText> : null}
           {loadError ? <ErrorText>{loadError}</ErrorText> : null}
 

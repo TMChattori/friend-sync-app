@@ -9,6 +9,14 @@ import { RegistrationProvider } from '@/components/auth/registration-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { configureTomorrowReminderHandler } from '@/services/tomorrow-reminders';
 
+let googleMobileAds: null | { default: () => { initialize: () => Promise<unknown> } } = null;
+
+try {
+  googleMobileAds = require('react-native-google-mobile-ads') as { default: () => { initialize: () => Promise<unknown> } };
+} catch {
+  googleMobileAds = null;
+}
+
 export const unstable_settings = {
   anchor: 'register',
 };
@@ -18,6 +26,9 @@ export default function RootLayout() {
 
   useEffect(() => {
     configureTomorrowReminderHandler();
+    void googleMobileAds?.default().initialize().catch(() => {
+      // AdMob is optional during development and in Expo Go.
+    });
   }, []);
 
   return (

@@ -8,8 +8,10 @@ import { AppButton } from '@/components/common/app-button';
 import { AppCard } from '@/components/common/app-card';
 import { AvatarBadge } from '@/components/common/avatar-badge';
 import { ErrorText, LoadingText } from '@/components/common/feedback-text';
+import { TopBannerAd } from '@/components/common/top-banner-ad';
 import { fetchAppUserProfile } from '@/services/auth-api';
 import { mergeAuthSession } from '@/services/auth-session';
+import { readCachedJson, writeCachedJson } from '@/services/local-cache';
 import {
   createFriendByDbId,
   deleteFriend,
@@ -39,12 +41,15 @@ export function FriendsScreenContent() {
   const [isFoundModalVisible, setIsFoundModalVisible] = useState(false);
   const [friends, setFriends] = useState<ApiFriend[]>([]);
   const [isLoadingFriends, setIsLoadingFriends] = useState(true);
+  const [isRefreshingFriends, setIsRefreshingFriends] = useState(false);
+  const [isShowingCachedFriends, setIsShowingCachedFriends] = useState(false);
   const [friendsError, setFriendsError] = useState<string | null>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const profileName = authSession?.username?.trim() || '名前未取得';
   const profileUserId = authSession?.publicUserId?.trim() || 'ID未取得';
   const profileIconUrl = authSession?.iconUrl ?? null;
   const myQrValue = useMemo(() => `friendsyncapp://friend?id=${encodeURIComponent(profileUserId)}`, [profileUserId]);
+  const friendCacheScope = authSession?.authUserId ?? authSession?.email ?? 'guest';
 
   useFocusEffect(
     useCallback(() => {
@@ -90,21 +95,77 @@ export function FriendsScreenContent() {
 
   const loadFriends = useCallback(async () => {
     try {
-      setIsLoadingFriends(true);
+      setIsLoadingFriends(friends.length === 0);
+      setIsRefreshingFriends(friends.length > 0);
       const apiFriends = await fetchFriends(authSession);
       setFriends(apiFriends);
       setFriendsError(null);
+      setIsShowingCachedFriends(false);
+      await writeCachedJson('friends', friendCacheScope, apiFriends);
     } catch {
-      setFriendsError('友達一覧を取得できませんでした。サーバー接続を確認してください。');
+      setFriendsError(
+        friends.length > 0
+          ? '前回の友達一覧を表示しています。最新情報の取得に失敗しました。'
+          : '友達一覧を取得できませんでした。サーバー接続を確認してください。'
+      );
     } finally {
       setIsLoadingFriends(false);
+      setIsRefreshingFriends(false);
     }
-  }, [authSession]);
+  }, [authSession, friendCacheScope, friends.length]);
 
   useFocusEffect(
     useCallback(() => {
-      loadFriends();
-    }, [loadFriends])
+      let isActive = true;
+
+      const hydrateFriends = async () => {
+        const cachedFriends = await readCachedJson<ApiFriend[]>('friends', friendCacheScope);
+
+        if (isActive && cachedFriends && cachedFriends.length > 0) {
+          setFriends(cachedFriends);
+          setFriendsError(null);
+          setIsShowingCachedFriends(true);
+          setIsLoadingFriends(false);
+        }
+
+        try {
+          setIsLoadingFriends(!cachedFriends || cachedFriends.length === 0);
+          setIsRefreshingFriends(!!cachedFriends && cachedFriends.length > 0);
+          const apiFriends = await fetchFriends(authSession);
+
+          if (!isActive) {
+            return;
+          }
+
+          setFriends(apiFriends);
+          setFriendsError(null);
+          setIsShowingCachedFriends(false);
+          await writeCachedJson('friends', friendCacheScope, apiFriends);
+        } catch {
+          if (!isActive) {
+            return;
+          }
+
+          setFriendsError(
+            cachedFriends && cachedFriends.length > 0
+              ? '前回の友達一覧を表示しています。最新情報の取得に失敗しました。'
+              : '友達一覧を取得できませんでした。サーバー接続を確認してください。'
+          );
+          setIsShowingCachedFriends(!!cachedFriends && cachedFriends.length > 0);
+        } finally {
+          if (isActive) {
+            setIsLoadingFriends(false);
+            setIsRefreshingFriends(false);
+          }
+        }
+      };
+
+      void hydrateFriends();
+
+      return () => {
+        isActive = false;
+      };
+    }, [authSession, friendCacheScope])
   );
 
   const filteredFriends = useMemo(() => {
@@ -222,6 +283,8 @@ export function FriendsScreenContent() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <TopBannerAd />
+
         <AppCard style={styles.selfCard}>
           <AvatarBadge
             label={profileName.slice(0, 1) || 'U'}
@@ -257,6 +320,8 @@ export function FriendsScreenContent() {
             <Text style={styles.sectionTitle}>友達一覧</Text>
             {!isLoadingFriends && !friendsError ? <Text style={styles.friendCount}>{filteredFriends.length}人</Text> : null}
           </View>
+          {isShowingCachedFriends ? <LoadingText>前回の友達一覧を先に表示しています。</LoadingText> : null}
+          {isRefreshingFriends ? <LoadingText>最新の友達一覧を更新中です...</LoadingText> : null}
           {friendsError ? <ErrorText>{friendsError}</ErrorText> : null}
           {isLoadingFriends ? <LoadingText>友達一覧を読み込み中です...</LoadingText> : null}
           <View style={styles.friendList}>

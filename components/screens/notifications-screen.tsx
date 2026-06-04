@@ -5,7 +5,7 @@ import { useRegistration } from '@/components/auth/registration-context';
 import { AppButton } from '@/components/common/app-button';
 import { AppCard } from '@/components/common/app-card';
 import { ErrorText, LoadingText } from '@/components/common/feedback-text';
-import { ScreenHeader } from '@/components/common/screen-header';
+import { TopBannerAd } from '@/components/common/top-banner-ad';
 import { DATE_OPTIONS, type NotificationItem } from '@/data/mock-data';
 import { fetchInvites, type ApiInvite } from '@/services/invites-api';
 
@@ -83,7 +83,7 @@ export function NotificationsScreenContent() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        <ScreenHeader title="通知" subtitle="お誘いの送信や返事をまとめて確認できます。" />
+        <TopBannerAd />
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>通知一覧</Text>

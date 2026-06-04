@@ -62,7 +62,8 @@
           }
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "react-native-google-mobile-ads"
     ],
     "experiments": {
       "typedRoutes": true,

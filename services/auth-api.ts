@@ -144,3 +144,35 @@ export async function requestPasswordReset(email: string) {
     body: JSON.stringify({ email }),
   });
 }
+
+export async function deleteAccount({
+  accessToken,
+  currentEmail,
+  reason,
+}: {
+  accessToken: string;
+  currentEmail: string;
+  reason: string;
+}) {
+  const headers = requireAuthHeaders({ email: currentEmail, accessToken }, {});
+  const body = JSON.stringify({ reason });
+
+  try {
+    await requestJson<void>('/auth/account', {
+      method: 'DELETE',
+      headers,
+      body,
+    });
+  } catch (error) {
+    if (error instanceof Error && (error.message === 'Not Found' || error.message === 'API request failed: 404')) {
+      await requestJson<void>('/auth/account/delete', {
+        method: 'POST',
+        headers,
+        body,
+      });
+      return;
+    }
+
+    throw error;
+  }
+}

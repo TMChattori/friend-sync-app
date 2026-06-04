@@ -21,7 +21,7 @@ import { AppCard } from '@/components/common/app-card';
 import { AppButton } from '@/components/common/app-button';
 import { Event, WEEK_LABELS } from '@/data/mock-data';
 import { createEvent, deleteEvent, fetchEvents, updateEvent } from '@/services/events-api';
-import { getApiBaseUrl } from '@/services/api-client';
+import { readCachedJson, writeCachedJson } from '@/services/local-cache';
 import { syncTomorrowScheduleReminders } from '@/services/tomorrow-reminders';
 import { compareDateKeys, formatDateKey, formatDateRangeLabel, isDateWithinRange, parseDateKey } from '@/utils/date-range';
 
@@ -80,6 +80,7 @@ const MAX_VISIBLE_EVENT_LANES = 3;
 const EVENT_BAR_HEIGHT = 16;
 const EVENT_BAR_GAP = 4;
 const EVENT_BAR_TOP = 28;
+const EVENT_BAR_SIDE_INSET = 2;
 
 let secureStoreModulePromise: Promise<typeof import('expo-secure-store') | null> | null = null;
 
@@ -292,6 +293,8 @@ export function CalendarScreenContent() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isShowingCachedEvents, setIsShowingCachedEvents] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [isFormModalVisible, setIsFormModalVisible] = useState(false);
   const [formMode, setFormMode] = useState<FormMode>('create');
@@ -313,13 +316,14 @@ export function CalendarScreenContent() {
   const [areCategoriesReady, setAreCategoriesReady] = useState(false);
   const [isCategoryModalVisible, setIsCategoryModalVisible] = useState(false);
   const [isEditingCategories, setIsEditingCategories] = useState(false);
-  const gridGap = 6;
+  const gridGap = 0;
   const calendarHorizontalPadding = 10;
   const screenHorizontalPadding = 8;
   const availableGridWidth = width - screenHorizontalPadding * 2 - calendarHorizontalPadding * 2;
   const dayCellWidth = Math.max(42, Math.floor((availableGridWidth - gridGap * 6) / 7));
   const currentUserId = authSession?.publicUserId ?? '';
   const categoryOwnerKey = authSession?.authUserId ?? authSession?.email ?? 'guest';
+  const eventCacheScope = authSession?.authUserId ?? authSession?.email ?? 'guest';
   const calendarMonths = useMemo(() => createCalendarMonths(displayYear), [displayYear]);
   const yearOptions = useMemo(
     () => Array.from({ length: YEAR_RANGE_RADIUS * 2 + 1 }, (_, index) => currentYear - YEAR_RANGE_RADIUS + index),
@@ -364,20 +368,37 @@ export function CalendarScreenContent() {
     let isMounted = true;
 
     const loadEvents = async () => {
+      const cachedEvents = await readCachedJson<Event[]>('events', eventCacheScope);
+
+      if (cachedEvents && cachedEvents.length > 0 && isMounted) {
+        setEvents(cachedEvents);
+        setSyncError(null);
+        setIsShowingCachedEvents(true);
+        setIsLoading(false);
+      }
+
       try {
-        setIsLoading(true);
+        setIsLoading(!cachedEvents || cachedEvents.length === 0);
+        setIsRefreshing(!!cachedEvents && cachedEvents.length > 0);
         const apiEvents = await fetchEvents(authSession);
         if (isMounted) {
           setEvents(apiEvents);
           setSyncError(null);
+          setIsShowingCachedEvents(false);
+          await writeCachedJson('events', eventCacheScope, apiEvents);
         }
       } catch {
         if (isMounted) {
-          setSyncError(`APIに接続できないため、ローカル予定を表示しています。接続先: ${getApiBaseUrl()}`);
+          setSyncError(
+            cachedEvents && cachedEvents.length > 0
+              ? '前回の予定を表示しています。最新情報の取得に失敗しました。'
+              : 'APIに接続できないため、ローカル予定を表示しています。'
+          );
         }
       } finally {
         if (isMounted) {
           setIsLoading(false);
+          setIsRefreshing(false);
         }
       }
     };
@@ -387,7 +408,7 @@ export function CalendarScreenContent() {
     return () => {
       isMounted = false;
     };
-  }, [authSession]);
+  }, [authSession, eventCacheScope]);
 
   useEffect(() => {
     let isMounted = true;
@@ -644,7 +665,31 @@ export function CalendarScreenContent() {
       closeFormModal();
       Alert.alert('予定追加', `${formatDateRangeLabel(draftStartDate, draftEndDate)} に予定を追加しました`);
     } catch {
-      Alert.alert('予定保存に失敗', `FastAPI サーバーとの接続を確認してください。\n接続先: ${getApiBaseUrl()}`);
+      try {
+        const latestEvents = await fetchEvents(authSession);
+        setEvents(latestEvents);
+
+        const matchedEvent = latestEvents.find((event) =>
+          event.startDate === draftStartDate &&
+          (event.endDate ?? event.startDate) === draftEndDate &&
+          event.title === trimmedTitle &&
+          event.startTime === draftStartTime &&
+          event.endTime === draftEndTime &&
+          (event.category ?? DEFAULT_CATEGORY_ID) === draftCategoryId
+        );
+
+        if (matchedEvent) {
+          setSelectedDate(draftStartDate);
+          setSyncError(null);
+          closeFormModal();
+          Alert.alert('予定追加', '予定は登録されました。通信確認に失敗したため、一覧を再同期しています。');
+          return;
+        }
+      } catch {
+        // Fall through to the generic error alert below.
+      }
+
+      Alert.alert('予定保存に失敗', 'サーバーとの接続を確認してください。');
     }
   };
 
@@ -660,7 +705,7 @@ export function CalendarScreenContent() {
             setEvents((current) => current.filter((item) => item.id !== event.id));
             Alert.alert('削除しました', '予定を削除しました。');
           } catch {
-            Alert.alert('削除に失敗', `FastAPI サーバーとの接続を確認してください。\n接続先: ${getApiBaseUrl()}`);
+            Alert.alert('削除に失敗', 'サーバーとの接続を確認してください。');
           }
         },
       },
@@ -683,6 +728,8 @@ export function CalendarScreenContent() {
                 <Text style={styles.monthTitle}>{month.title}</Text>
                 <Text style={styles.monthMeta}>自分だけの予定を月で管理</Text>
                 {monthIndex === 0 && syncError ? <Text style={styles.syncText}>{syncError}</Text> : null}
+                {monthIndex === 0 && isShowingCachedEvents ? <Text style={styles.syncText}>前回の予定を先に表示しています。</Text> : null}
+                {monthIndex === 0 && isRefreshing ? <Text style={styles.syncText}>最新の予定を更新中です...</Text> : null}
                 {monthIndex === 0 && isLoading ? <Text style={styles.syncText}>予定を読み込み中です...</Text> : null}
               </View>
               {monthIndex === 0 ? (
@@ -747,8 +794,11 @@ export function CalendarScreenContent() {
                       {weekSpans.map((span) => {
                         const category = getCategoryById(categories, span.event.category);
                         const laneTop = EVENT_BAR_TOP + span.lane * (EVENT_BAR_HEIGHT + EVENT_BAR_GAP);
-                        const spanWidth = (span.endCol - span.startCol + 1) * dayCellWidth + (span.endCol - span.startCol) * gridGap - 6;
-                        const left = span.startCol * (dayCellWidth + gridGap) + 3;
+                        const spanWidth =
+                          (span.endCol - span.startCol + 1) * dayCellWidth +
+                          (span.endCol - span.startCol) * gridGap -
+                          EVENT_BAR_SIDE_INSET * 2;
+                        const left = span.startCol * (dayCellWidth + gridGap) + EVENT_BAR_SIDE_INSET;
 
                         return (
                           <View
@@ -758,7 +808,7 @@ export function CalendarScreenContent() {
                               {
                                 top: laneTop,
                                 left,
-                                width: Math.max(spanWidth, dayCellWidth - 6),
+                                width: Math.max(spanWidth, dayCellWidth - EVENT_BAR_SIDE_INSET * 2),
                                 backgroundColor: category.color,
                                 borderTopLeftRadius: span.startsInWeek ? 6 : 0,
                                 borderBottomLeftRadius: span.startsInWeek ? 6 : 0,
@@ -1147,12 +1197,12 @@ const styles = StyleSheet.create({
   weekLabel: { flex: 1, textAlign: 'center', fontSize: 12, fontWeight: '700', color: '#7a879d' },
   sunLabel: { color: '#ef6a6a' },
   satLabel: { color: '#4e80ff' },
-  grid: { gap: 6 },
+  grid: { gap: 0 },
   weekBlock: { position: 'relative' },
-  weekCellsRow: { flexDirection: 'row', gap: 6 },
+  weekCellsRow: { flexDirection: 'row', gap: 0 },
   weekBarsOverlay: { ...StyleSheet.absoluteFillObject },
   dayCell: {
-    borderRadius: 16,
+    borderRadius: 0,
     paddingTop: 8,
     paddingHorizontal: 3,
     paddingBottom: 8,
@@ -1161,15 +1211,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   dayCellCurrent: { backgroundColor: '#fbfcff', borderColor: '#e7ebf3' },
-  dayCellMuted: { backgroundColor: '#f3f5fa', borderColor: '#f3f5fa' },
+  dayCellMuted: { backgroundColor: '#f5f7fb', borderColor: '#e7ebf3' },
   dayCellSelected: {
     backgroundColor: '#1f6fff',
     borderColor: '#1f6fff',
-    shadowColor: '#1f6fff',
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
   },
   dayNumber: { fontSize: 14, fontWeight: '800', color: '#1a2740', textAlign: 'center' },
   dayNumberMuted: { color: '#b3bccb' },

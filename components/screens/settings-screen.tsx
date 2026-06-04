@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
@@ -7,8 +7,9 @@ import { useRegistration } from '@/components/auth/registration-context';
 import { AvatarBadge } from '@/components/common/avatar-badge';
 import { AppButton } from '@/components/common/app-button';
 import { AppCard } from '@/components/common/app-card';
-import { ScreenHeader } from '@/components/common/screen-header';
+import { TopBannerAd } from '@/components/common/top-banner-ad';
 import {
+  deleteAccount,
   fetchAppUserProfile,
   updateAppUserProfile,
   updateAuthProfile,
@@ -33,6 +34,9 @@ export function SettingsScreenContent() {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [isSavingAccount, setIsSavingAccount] = useState(false);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
+  const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   const sessionIdentity = authSession?.authUserId ?? currentEmail;
 
@@ -97,6 +101,14 @@ export function SettingsScreenContent() {
   const handleRelogin = () => {
     clearRegistration();
     router.replace('/register');
+  };
+
+  const closeDeleteModal = () => {
+    if (isDeletingAccount) {
+      return;
+    }
+    setDeleteReason('');
+    setIsDeleteModalVisible(false);
   };
 
   const handlePickImage = async () => {
@@ -236,10 +248,42 @@ export function SettingsScreenContent() {
     }
   };
 
+  const handleDeleteAccount = async () => {
+    if (!authSession?.accessToken || !authSession.email) {
+      Alert.alert('ログイン情報を確認', '再ログインしてからアカウント削除を行ってください。');
+      return;
+    }
+
+    const trimmedReason = deleteReason.trim();
+    if (!trimmedReason) {
+      Alert.alert('入力を確認', '削除理由を入力してください。');
+      return;
+    }
+
+    try {
+      setIsDeletingAccount(true);
+      await deleteAccount({
+        accessToken: authSession.accessToken,
+        currentEmail: authSession.email,
+        reason: trimmedReason,
+      });
+      clearRegistration();
+      setIsDeleteModalVisible(false);
+      setDeleteReason('');
+      router.replace('/register');
+      Alert.alert('アカウントを削除しました', 'ご利用ありがとうございました。');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'アカウント削除に失敗しました。';
+      Alert.alert('削除に失敗', message);
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        <ScreenHeader title="設定" subtitle="プロフィールとアカウント情報をここで整えられます。" />
+        <TopBannerAd />
 
         <AppCard style={styles.profileCard}>
           <View style={styles.profileTopRow}>
@@ -375,8 +419,56 @@ export function SettingsScreenContent() {
           <View style={styles.cardActions}>
             <AppButton label="サインアウト" variant="secondary" onPress={handleRelogin} />
           </View>
+          <View style={styles.cardActions}>
+            <Pressable onPress={() => setIsDeleteModalVisible(true)} style={styles.deleteAccountButton}>
+              <Text style={styles.deleteAccountButtonText}>アカウント削除</Text>
+            </Pressable>
+          </View>
         </AppCard>
       </ScrollView>
+
+      <Modal animationType="fade" transparent visible={isDeleteModalVisible} onRequestClose={closeDeleteModal}>
+        <KeyboardAvoidingView
+          style={styles.modalRoot}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <Pressable style={styles.modalBackdrop} onPress={closeDeleteModal}>
+            <Pressable style={styles.modalCard} onPress={() => {}}>
+              <ScrollView
+                bounces={false}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={styles.modalScrollContent}>
+                <Text style={styles.modalTitle}>アカウントを削除</Text>
+                <Text style={styles.modalSubtitle}>
+                  アカウントを削除すると、プロフィール、予定、友達関係、招待履歴が削除されます。続行する理由を入力してください。
+                </Text>
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>削除理由</Text>
+                  <TextInput
+                    value={deleteReason}
+                    onChangeText={setDeleteReason}
+                    autoCorrect={false}
+                    spellCheck={false}
+                    placeholder="例: もう使わなくなったため"
+                    placeholderTextColor="#8a97ab"
+                    multiline
+                    textAlignVertical="top"
+                    style={[styles.input, styles.noteInput]}
+                  />
+                </View>
+                <View style={styles.modalActions}>
+                  <AppButton label="閉じる" variant="secondary" onPress={closeDeleteModal} disabled={isDeletingAccount} />
+                  <Pressable
+                    disabled={isDeletingAccount || !deleteReason.trim()}
+                    onPress={handleDeleteAccount}
+                    style={[styles.deleteConfirmButton, (isDeletingAccount || !deleteReason.trim()) && styles.deleteConfirmButtonDisabled]}>
+                    <Text style={styles.deleteConfirmButtonText}>{isDeletingAccount ? '削除中...' : '削除する'}</Text>
+                  </Pressable>
+                </View>
+              </ScrollView>
+            </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -412,4 +504,49 @@ const styles = StyleSheet.create({
   readonlyText: { fontSize: 15, fontWeight: '700', color: '#44536a' },
   noteInput: { minHeight: 104 },
   cardActions: { paddingTop: 6, alignItems: 'flex-start' },
+  deleteAccountButton: {
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+  },
+  deleteAccountButtonText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#d14c73',
+  },
+  modalRoot: { flex: 1 },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(21, 32, 51, 0.18)', justifyContent: 'center', padding: 16 },
+  modalCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 28,
+    maxHeight: '82%',
+    shadowColor: '#111827',
+    shadowOpacity: 0.12,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
+  modalScrollContent: {
+    padding: 18,
+    gap: 14,
+  },
+  modalTitle: { fontSize: 20, fontWeight: '800', color: '#152033' },
+  modalSubtitle: { fontSize: 13, lineHeight: 20, color: '#6f7f95' },
+  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10 },
+  deleteConfirmButton: {
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#d14c73',
+  },
+  deleteConfirmButtonDisabled: {
+    backgroundColor: '#f1c9d5',
+  },
+  deleteConfirmButtonText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#ffffff',
+  },
 });

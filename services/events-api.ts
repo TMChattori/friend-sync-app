@@ -49,19 +49,11 @@ export async function fetchEvents(session: AuthSession | null) {
   return events.map(mapApiEvent);
 }
 
-export async function fetchFriendEvents(session: AuthSession | null) {
-  const events = await requestJson<ApiEvent[]>('/events/friends', {
-    headers: requireAuthHeaders(session),
-  });
-  return events.map(mapApiEvent);
-}
-
 export async function createEvent(payload: EventCreatePayload, session: AuthSession | null) {
   const event = await requestJson<ApiEvent>('/events', {
     method: 'POST',
     headers: requireAuthHeaders(session),
     body: JSON.stringify({
-      user_id: payload.userId,
       start_date: payload.startDate,
       end_date: payload.endDate ?? payload.startDate,
       title: payload.title,
@@ -79,7 +71,6 @@ export async function updateEvent(eventId: string, payload: EventCreatePayload, 
     method: 'PUT',
     headers: requireAuthHeaders(session),
     body: JSON.stringify({
-      user_id: payload.userId,
       start_date: payload.startDate,
       end_date: payload.endDate ?? payload.startDate,
       title: payload.title,

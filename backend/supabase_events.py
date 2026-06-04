@@ -3,7 +3,7 @@ from urllib.parse import quote
 import certifi
 import httpx
 
-from config import SUPABASE_URL, get_admin_key
+from config import SUPABASE_URL, get_admin_key, get_auth_key
 from schemas import Event, EventCreate, EventUpdate
 
 
@@ -19,29 +19,41 @@ class SupabaseRequestError(RuntimeError):
 
 
 def _ensure_config() -> None:
-    if not SUPABASE_URL or not get_admin_key():
-        raise SupabaseConfigError("SUPABASE_URL and a backend Supabase key are required")
+    if not SUPABASE_URL:
+        raise SupabaseConfigError("SUPABASE_URL is required")
 
 
-def _headers() -> dict[str, str]:
-    admin_key = get_admin_key()
+def _headers(access_token: str | None = None, *, admin: bool = False) -> dict[str, str]:
+    api_key = get_admin_key() if admin else get_auth_key()
+    bearer_token = get_admin_key() if admin else access_token or get_auth_key()
+
+    if not api_key or not bearer_token:
+        raise SupabaseConfigError("Supabase API key and bearer token are required")
+
     return {
-        "apikey": admin_key,
-        "Authorization": f"Bearer {admin_key}",
+        "apikey": api_key,
+        "Authorization": f"Bearer {bearer_token}",
         "Content-Type": "application/json",
         "Accept": "application/json",
         "Prefer": "return=representation",
     }
 
 
-def _request(method: str, path: str, json: dict | None = None) -> list[dict]:
+def _request(
+    method: str,
+    path: str,
+    json: dict | None = None,
+    access_token: str | None = None,
+    *,
+    admin: bool = False,
+) -> list[dict]:
     _ensure_config()
 
     with httpx.Client(verify=certifi.where(), timeout=10) as client:
         response = client.request(
             method,
             f"{SUPABASE_URL}/rest/v1/{path}",
-            headers=_headers(),
+            headers=_headers(access_token, admin=admin),
             json=json,
         )
 
@@ -78,46 +90,47 @@ def _payload_for_db(payload: EventCreate | EventUpdate) -> dict:
     return payload.model_dump()
 
 
-def list_events(user_db_id: int) -> list[Event]:
+def list_events(access_token: str, user_db_id: int) -> list[Event]:
     encoded_user_id = quote(str(user_db_id), safe="")
-    rows = _request("GET", f"events?select=*&user_id=eq.{encoded_user_id}&order=start_date.asc,start_time.asc")
+    rows = _request("GET", f"events?select=*&user_id=eq.{encoded_user_id}&order=start_date.asc,start_time.asc", access_token=access_token)
     return [_event_from_row(row) for row in rows]
 
 
-def list_friend_events(owner_user_id: int) -> list[Event]:
+def list_friend_events(access_token: str, owner_user_id: int) -> list[Event]:
     relation_rows = _request(
         "GET",
         f"Friend?select=friend_user_id&owner_user_id=eq.{owner_user_id}",
+        access_token=access_token,
     )
     friend_user_ids = sorted({str(row["friend_user_id"]) for row in relation_rows if row.get("friend_user_id") is not None})
     if not friend_user_ids:
         return []
 
     encoded_ids = ",".join(friend_user_ids)
-    rows = _request("GET", f"events?select=*&user_id=in.({encoded_ids})&order=start_date.asc,start_time.asc")
+    rows = _request("GET", f"events?select=*&user_id=in.({encoded_ids})&order=start_date.asc,start_time.asc", access_token=access_token)
     return [_event_from_row(row) for row in rows]
 
 
-def create_event(payload: EventCreate, user_db_id: int) -> Event:
+def create_event(payload: EventCreate, access_token: str, user_db_id: int) -> Event:
     db_payload = _payload_for_db(payload)
     db_payload["user_id"] = str(user_db_id)
-    rows = _request("POST", "events", db_payload)
+    rows = _request("POST", "events", db_payload, access_token=access_token)
     return _event_from_row(rows[0])
 
 
-def update_event(event_id: str, payload: EventUpdate, user_db_id: int) -> Event | None:
+def update_event(event_id: str, payload: EventUpdate, access_token: str, user_db_id: int) -> Event | None:
     encoded_user_id = quote(str(user_db_id), safe="")
     db_payload = _payload_for_db(payload)
     db_payload["user_id"] = str(user_db_id)
-    rows = _request("PATCH", f"events?id=eq.{event_id}&user_id=eq.{encoded_user_id}", db_payload)
+    rows = _request("PATCH", f"events?id=eq.{event_id}&user_id=eq.{encoded_user_id}", db_payload, access_token=access_token)
     if not rows:
         return None
     return _event_from_row(rows[0])
 
 
-def delete_event(event_id: str, user_db_id: int) -> Event | None:
+def delete_event(event_id: str, access_token: str, user_db_id: int) -> Event | None:
     encoded_user_id = quote(str(user_db_id), safe="")
-    rows = _request("DELETE", f"events?id=eq.{event_id}&user_id=eq.{encoded_user_id}")
+    rows = _request("DELETE", f"events?id=eq.{event_id}&user_id=eq.{encoded_user_id}", access_token=access_token)
     if not rows:
         return None
     return _event_from_row(rows[0])

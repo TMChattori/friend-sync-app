@@ -37,6 +37,10 @@ class Friend(FriendCreate):
     status: str = Field(..., description='友達の状態。"available" または "busy"')
 
 
+class AvailableFriendsQuery(BaseModel):
+    date: str = Field(..., description="空き状況を確認する日付。例: 2026-04-15")
+
+
 class FriendCandidate(BaseModel):
     id: int = Field(..., description="User テーブル上のID")
     name: str = Field(..., description="表示名")
@@ -94,3 +98,7 @@ class AuthSession(BaseModel):
 
 class PasswordResetRequest(BaseModel):
     email: str = Field(..., min_length=1, description="パスワード再設定メールの送信先")
+
+
+class AccountDeletionRequest(BaseModel):
+    reason: str = Field(..., min_length=1, description="アカウント削除理由")

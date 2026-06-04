@@ -46,25 +46,71 @@ def _request(method: str, path: str, json: dict | None = None, access_token: str
     return data if isinstance(data, dict) else {}
 
 
-def _db_headers() -> dict[str, str]:
+def _admin_auth_headers() -> dict[str, str]:
     admin_key = get_admin_key()
+    if not admin_key:
+        raise SupabaseConfigError("Supabase admin key is required")
+
     return {
         "apikey": admin_key,
         "Authorization": f"Bearer {admin_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+
+def _admin_auth_request(method: str, path: str, json: dict | None = None) -> dict:
+    _ensure_config()
+
+    with httpx.Client(verify=certifi.where(), timeout=15) as client:
+        response = client.request(
+            method,
+            f"{SUPABASE_URL}/auth/v1/{path}",
+            headers=_admin_auth_headers(),
+            json=json,
+        )
+
+    if response.status_code >= 400:
+        raise SupabaseRequestError(response.status_code, response.text)
+
+    if not response.content:
+        return {}
+
+    data = response.json()
+    return data if isinstance(data, dict) else {}
+
+
+def _db_headers(access_token: str | None = None, *, admin: bool = False) -> dict[str, str]:
+    api_key = get_admin_key() if admin else get_auth_key()
+    bearer_token = get_admin_key() if admin else access_token or get_auth_key()
+
+    if not api_key or not bearer_token:
+        raise SupabaseConfigError("Supabase DB API key and bearer token are required")
+
+    return {
+        "apikey": api_key,
+        "Authorization": f"Bearer {bearer_token}",
         "Content-Type": "application/json",
         "Accept": "application/json",
         "Prefer": "return=representation",
     }
 
 
-def _db_request(method: str, path: str, json: dict | None = None) -> list[dict]:
+def _db_request(
+    method: str,
+    path: str,
+    json: dict | None = None,
+    access_token: str | None = None,
+    *,
+    admin: bool = True,
+) -> list[dict]:
     _ensure_config()
 
     with httpx.Client(verify=certifi.where(), timeout=10) as client:
         response = client.request(
             method,
             f"{SUPABASE_URL}/rest/v1/{path}",
-            headers=_db_headers(),
+            headers=_db_headers(access_token, admin=admin),
             json=json,
         )
 
@@ -107,6 +153,19 @@ def resolve_app_user(access_token: str, current_email: str) -> dict:
     return ensure_app_user(str(auth_user["id"]), current_email, auth_user.get("user_metadata", {}).get("username"))
 
 
+def _get_self_app_user(access_token: str, auth_user_id: str) -> dict:
+    encoded_auth_user_id = quote(auth_user_id, safe="")
+    rows = _db_request(
+        "GET",
+        f"User?select=id,auth_user_id,name,user_id,note,icon_url,mailadress,plan_status&auth_user_id=eq.{encoded_auth_user_id}&limit=1",
+        access_token=access_token,
+        admin=False,
+    )
+    if not rows:
+        raise SupabaseRequestError(404, "App user profile was not found")
+    return rows[0]
+
+
 def upload_profile_icon_file(access_token: str, current_email: str, content: bytes, content_type: str | None) -> str:
     if not current_email:
         raise SupabaseRequestError(400, "current email is required")
@@ -128,6 +187,35 @@ def upload_profile_icon_file(access_token: str, current_email: str, content: byt
 
     encoded_path = quote(object_path, safe="/")
     return f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_STORAGE_BUCKET}/{encoded_path}"
+
+
+def _delete_storage_object_by_public_url(icon_url: str | None) -> None:
+    if not icon_url or not SUPABASE_URL:
+        return
+
+    public_prefix = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_STORAGE_BUCKET}/"
+    if not icon_url.startswith(public_prefix):
+        return
+
+    object_path = icon_url[len(public_prefix):]
+    if not object_path:
+        return
+
+    admin_key = get_admin_key()
+    if not admin_key:
+        raise SupabaseConfigError("Supabase admin key is required")
+
+    with httpx.Client(verify=certifi.where(), timeout=15) as client:
+        response = client.delete(
+            f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_STORAGE_BUCKET}/{object_path}",
+            headers={
+                "apikey": admin_key,
+                "Authorization": f"Bearer {admin_key}",
+            },
+        )
+
+    if response.status_code >= 400 and response.status_code != 404:
+        raise SupabaseRequestError(response.status_code, response.text)
 
 
 def _session_from_response(
@@ -223,7 +311,9 @@ def get_app_user_profile(access_token: str, current_email: str) -> AuthSession:
         raise SupabaseRequestError(400, "current email is required")
 
     auth_user = get_auth_user(access_token)
-    app_user = ensure_app_user(str(auth_user["id"]), current_email, auth_user.get("user_metadata", {}).get("username"))
+    auth_user_id = str(auth_user["id"])
+    ensure_app_user(auth_user_id, current_email, auth_user.get("user_metadata", {}).get("username"))
+    app_user = _get_self_app_user(access_token, auth_user_id)
     return _session_from_response({"user": auth_user}, current_email, access_token, app_user)
 
 
@@ -246,7 +336,9 @@ def update_app_user_profile(access_token: str, current_email: str, payload: Auth
         raise SupabaseRequestError(400, "current email is required")
 
     auth_user = get_auth_user(access_token)
-    app_user = ensure_app_user(str(auth_user["id"]), current_email)
+    auth_user_id = str(auth_user["id"])
+    ensure_app_user(auth_user_id, current_email)
+    app_user = _get_self_app_user(access_token, auth_user_id)
     update_payload: dict[str, str] = {}
 
     if payload.username is not None:
@@ -283,8 +375,8 @@ def update_app_user_profile(access_token: str, current_email: str, payload: Auth
     if not update_payload:
         return _session_from_response({"user": auth_user}, current_email, access_token, app_user)
 
-    rows = _db_request("PATCH", f"User?id=eq.{app_user['id']}", update_payload)
-    updated_app_user = rows[0] if rows else ensure_app_user(str(auth_user["id"]), current_email)
+    rows = _db_request("PATCH", f"User?id=eq.{app_user['id']}", update_payload, access_token=access_token, admin=False)
+    updated_app_user = rows[0] if rows else _get_self_app_user(access_token, auth_user_id)
     return _session_from_response({"user": auth_user}, current_email, access_token, updated_app_user)
 
 
@@ -360,3 +452,26 @@ def send_password_reset_email(payload: PasswordResetRequest) -> None:
             "email": payload.email,
         },
     )
+
+
+def delete_account(access_token: str, current_email: str, reason: str) -> None:
+    if not current_email:
+        raise SupabaseRequestError(400, "current email is required")
+
+    if not reason.strip():
+        raise SupabaseRequestError(400, "Account deletion reason is required")
+
+    auth_user = get_auth_user(access_token)
+    auth_user_id = str(auth_user["id"])
+    ensure_app_user(auth_user_id, current_email)
+    app_user = _get_self_app_user(access_token, auth_user_id)
+    app_user_id = int(app_user["id"])
+
+    _delete_storage_object_by_public_url(app_user.get("icon_url"))
+    _db_request("DELETE", f'invites?from_user_id=eq.{app_user_id}', admin=True)
+    _db_request("DELETE", f'invites?to_user_id=eq.{app_user_id}', admin=True)
+    _db_request("DELETE", f'events?user_id=eq.{app_user_id}', admin=True)
+    _db_request("DELETE", f'Friend?owner_user_id=eq.{app_user_id}', admin=True)
+    _db_request("DELETE", f'Friend?friend_user_id=eq.{app_user_id}', admin=True)
+    _db_request("DELETE", f'User?id=eq.{app_user_id}', admin=True)
+    _admin_auth_request("DELETE", f"admin/users/{auth_user_id}")

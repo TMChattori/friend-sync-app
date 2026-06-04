@@ -2,13 +2,13 @@ from schemas import Invite, InviteCreate
 from supabase_events import _request
 
 
-def _get_users_by_ids(user_ids: list[str]) -> dict[str, dict]:
+def _get_users_by_ids(user_ids: list[str], access_token: str) -> dict[str, dict]:
     normalized_ids = sorted({user_id for user_id in user_ids if user_id})
     if not normalized_ids:
         return {}
 
     joined_ids = ",".join(normalized_ids)
-    rows = _request("GET", f"User?select=id,name&id=in.({joined_ids})")
+    rows = _request("GET", f"User?select=id,name&id=in.({joined_ids})", access_token=access_token)
     return {str(row["id"]): row for row in rows}
 
 
@@ -32,29 +32,33 @@ def _payload_for_db(payload: InviteCreate) -> dict:
     return payload.model_dump()
 
 
-def list_invites(to_user_id: int) -> list[Invite]:
-    rows = _request("GET", f"invites?select=*&to_user_id=eq.{to_user_id}&order=created_at.desc")
-    users_by_id = _get_users_by_ids([str(row["from_user_id"]) for row in rows] + [str(row["to_user_id"]) for row in rows])
+def list_invites(access_token: str, to_user_id: int) -> list[Invite]:
+    rows = _request("GET", f"invites?select=*&to_user_id=eq.{to_user_id}&order=created_at.desc", access_token=access_token)
+    users_by_id = _get_users_by_ids([str(row["from_user_id"]) for row in rows] + [str(row["to_user_id"]) for row in rows], access_token)
     return [_invite_from_row(row, users_by_id) for row in rows]
 
 
-def list_sent_invites(from_user_id: int) -> list[Invite]:
-    rows = _request("GET", f"invites?select=*&from_user_id=eq.{from_user_id}&order=created_at.desc")
-    users_by_id = _get_users_by_ids([str(row["from_user_id"]) for row in rows] + [str(row["to_user_id"]) for row in rows])
+def list_sent_invites(access_token: str, from_user_id: int) -> list[Invite]:
+    rows = _request("GET", f"invites?select=*&from_user_id=eq.{from_user_id}&order=created_at.desc", access_token=access_token)
+    users_by_id = _get_users_by_ids([str(row["from_user_id"]) for row in rows] + [str(row["to_user_id"]) for row in rows], access_token)
     return [_invite_from_row(row, users_by_id) for row in rows]
 
 
-def create_invite(payload: InviteCreate, from_user_id: int) -> Invite:
+def create_invite(payload: InviteCreate, access_token: str, from_user_id: int) -> Invite:
     db_payload = _payload_for_db(payload)
     db_payload["from_user_id"] = str(from_user_id)
-    rows = _request("POST", "invites", db_payload)
-    users_by_id = _get_users_by_ids([str(rows[0]["from_user_id"]), str(rows[0]["to_user_id"])])
+    rows = _request("POST", "invites", db_payload, access_token=access_token)
+    users_by_id = _get_users_by_ids([str(rows[0]["from_user_id"]), str(rows[0]["to_user_id"])], access_token)
     return _invite_from_row(rows[0], users_by_id)
 
 
-def delete_invite(invite_id: str) -> Invite | None:
-    rows = _request("DELETE", f"invites?id=eq.{invite_id}")
+def delete_invite(invite_id: str, access_token: str, current_user_id: int) -> Invite | None:
+    rows = _request(
+        "DELETE",
+        f"invites?id=eq.{invite_id}&or=(from_user_id.eq.{current_user_id},to_user_id.eq.{current_user_id})",
+        access_token=access_token,
+    )
     if not rows:
         return None
-    users_by_id = _get_users_by_ids([str(rows[0]["from_user_id"]), str(rows[0]["to_user_id"])])
+    users_by_id = _get_users_by_ids([str(rows[0]["from_user_id"]), str(rows[0]["to_user_id"])], access_token)
     return _invite_from_row(rows[0], users_by_id)

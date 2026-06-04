@@ -18,7 +18,7 @@ export type ApiFriendCandidate = {
 };
 
 function buildAuthHeaders(session: AuthSession | null) {
-  return requireAuthHeaders(session, session?.authUserId ? { 'X-Current-Auth-User-Id': session.authUserId } : undefined);
+  return requireAuthHeaders(session);
 }
 
 export function fetchFriends(session: AuthSession | null) {
@@ -56,6 +56,11 @@ export function searchFriendCandidatesByName(name: string, session: AuthSession 
 
 export function fetchFriendCandidateByPublicUserId(publicUserId: string, session: AuthSession | null) {
   return requestJson<ApiFriendCandidate>(`/friends/by-public-id/${encodeURIComponent(publicUserId)}`, { headers: buildAuthHeaders(session) });
+}
+
+export function fetchAvailableFriends(date: string, session: AuthSession | null) {
+  const query = encodeURIComponent(date);
+  return requestJson<ApiFriend[]>(`/available-friends?date=${query}`, { headers: buildAuthHeaders(session) });
 }
 
 export function deleteFriend(friendId: number, session: AuthSession | null) {

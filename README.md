@@ -16,6 +16,36 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
    npx expo start
    ```
 
+If Node.js is not installed globally on this machine, you can use the local runtime bundled in this repository:
+
+```bash
+source ./scripts/expo-local-env.sh
+npx expo start
+```
+
+For local API development, start the backend separately:
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Do not set `EXPO_PUBLIC_API_URL` to `127.0.0.1` when using Expo Go on a device. Leaving it unset allows the app to infer your Mac's LAN address automatically.
+
+## Output file naming
+
+When saving output to a file, use the input search conditions as the file name and write the output inside that file.
+
+Example:
+
+- Input conditions: `愛知県長久手市`, `税理士事務所`, `20件`
+- Output file name: `愛知県長久手市_税理士事務所_20件.md`
+
+This rule makes it easy to identify which output belongs to which search criteria.
+
 In the output, you'll find options to open the app in a
 
 - [development build](https://docs.expo.dev/develop/development-builds/introduction/)

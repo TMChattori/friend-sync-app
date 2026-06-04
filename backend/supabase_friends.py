@@ -1,48 +1,5 @@
-from urllib.parse import quote
-
-import certifi
-import httpx
-
-from config import SUPABASE_URL, get_admin_key
 from schemas import Friend, FriendCandidate, FriendCreate
-from supabase_events import SupabaseConfigError, SupabaseRequestError
-
-
-def _ensure_config() -> None:
-    if not SUPABASE_URL or not get_admin_key():
-        raise SupabaseConfigError("SUPABASE_URL and a backend Supabase key are required")
-
-
-def _headers() -> dict[str, str]:
-    admin_key = get_admin_key()
-    return {
-        "apikey": admin_key,
-        "Authorization": f"Bearer {admin_key}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "Prefer": "return=representation",
-    }
-
-
-def _request(method: str, path: str, json: dict | None = None) -> list[dict]:
-    _ensure_config()
-
-    with httpx.Client(verify=certifi.where(), timeout=10) as client:
-        response = client.request(
-            method,
-            f"{SUPABASE_URL}/rest/v1/{path}",
-            headers=_headers(),
-            json=json,
-        )
-
-    if response.status_code >= 400:
-        raise SupabaseRequestError(response.status_code, response.text)
-
-    if not response.content:
-        return []
-
-    data = response.json()
-    return data if isinstance(data, list) else [data]
+from supabase_events import SupabaseConfigError, SupabaseRequestError, _request
 
 
 def _public_user_id_from_user(row: dict) -> str | None:
@@ -62,12 +19,12 @@ def _friend_from_relation(relation: dict, users_by_id: dict[int, dict]) -> Frien
     )
 
 
-def _get_users_by_ids(user_ids: list[int]) -> dict[int, dict]:
+def _get_users_by_ids(user_ids: list[int], access_token: str) -> dict[int, dict]:
     if not user_ids:
         return {}
 
     ids = ",".join(str(user_id) for user_id in sorted(set(user_ids)))
-    rows = _request("GET", f"User?select=id,name,user_id,note,icon_url&id=in.({ids})")
+    rows = _request("GET", f"User?select=id,name,user_id,note,icon_url&id=in.({ids})", access_token=access_token)
     return {int(row["id"]): row for row in rows}
 
 
@@ -80,73 +37,94 @@ def _candidate_from_user(row: dict) -> FriendCandidate:
     )
 
 
-def _relation_exists(owner_user_id: int, friend_user_id: int) -> bool:
+def _relation_exists(owner_user_id: int, friend_user_id: int, access_token: str) -> bool:
     rows = _request(
         "GET",
         f"Friend?select=id&owner_user_id=eq.{owner_user_id}&friend_user_id=eq.{friend_user_id}&limit=1",
+        access_token=access_token,
     )
     return bool(rows)
 
 
-def _create_relation_if_missing(owner_user_id: int, friend_user_id: int) -> list[dict]:
-    if _relation_exists(owner_user_id, friend_user_id):
-        return _request(
-            "GET",
-            f"Friend?select=id,owner_user_id,friend_user_id,created_at,updated_at&owner_user_id=eq.{owner_user_id}&friend_user_id=eq.{friend_user_id}&limit=1",
-        )
-
-    return _request(
-        "POST",
-        "Friend",
-        {
-            "owner_user_id": owner_user_id,
-            "friend_user_id": friend_user_id,
-        },
-    )
-
-
-def list_friends(owner_user_id: int) -> list[Friend]:
+def list_friends(access_token: str, owner_user_id: int) -> list[Friend]:
     relations = _request(
         "GET",
         f"Friend?select=id,owner_user_id,friend_user_id,created_at,updated_at&owner_user_id=eq.{owner_user_id}&order=id.asc",
+        access_token=access_token,
     )
-    users_by_id = _get_users_by_ids([int(row["friend_user_id"]) for row in relations])
+    users_by_id = _get_users_by_ids([int(row["friend_user_id"]) for row in relations], access_token)
     return [_friend_from_relation(row, users_by_id) for row in relations]
 
 
-def search_friend_candidates(name: str, owner_user_id: int) -> list[FriendCandidate]:
-    keyword = quote(name.strip(), safe="")
-    rows = _request(
+def list_available_friends(access_token: str, owner_user_id: int, target_date: str) -> list[Friend]:
+    relations = _request(
         "GET",
-        f"User?select=id,name,user_id,note&name=eq.{keyword}&order=id.asc&limit=20",
+        f"Friend?select=id,owner_user_id,friend_user_id,created_at,updated_at&owner_user_id=eq.{owner_user_id}&order=id.asc",
+        access_token=access_token,
     )
-    return [_candidate_from_user(row) for row in rows if int(row["id"]) != owner_user_id]
+    if not relations:
+        return []
+
+    friend_user_ids = [int(row["friend_user_id"]) for row in relations]
+    users_by_id = _get_users_by_ids(friend_user_ids, access_token)
+    busy_user_ids: set[int] = set()
+
+    # 友達予定の詳細は返さず、空き状況だけ判定します。
+    # RLS や単日イベントの形により判定取得が失敗しても、ホーム画面全体は落とさないようにします。
+    try:
+        encoded_ids = ",".join(str(user_id) for user_id in sorted(set(friend_user_ids)))
+        busy_rows = _request(
+            "GET",
+            "events"
+            f"?select=user_id"
+            f"&user_id=in.({encoded_ids})"
+            f"&or=(and(start_date.lte.{target_date},end_date.gte.{target_date}),and(start_date.eq.{target_date},end_date.is.null))",
+            access_token=access_token,
+        )
+        busy_user_ids = {int(row["user_id"]) for row in busy_rows if row.get("user_id") is not None}
+    except SupabaseRequestError:
+        busy_user_ids = set()
+
+    friends: list[Friend] = []
+    for relation in relations:
+        friend = _friend_from_relation(relation, users_by_id)
+        friend.status = "busy" if (friend.user_db_id or 0) in busy_user_ids else "available"
+        friends.append(friend)
+
+    return friends
 
 
-def find_friend_candidate_by_public_user_id(public_user_id: str, owner_user_id: int) -> FriendCandidate | None:
-    keyword = quote(public_user_id.strip(), safe="")
+def search_friend_candidates(name: str, access_token: str) -> list[FriendCandidate]:
     rows = _request(
-        "GET",
-        f"User?select=id,name,user_id,note&user_id=eq.{keyword}&limit=1",
+        "POST",
+        "rpc/search_friend_candidates",
+        {"search_name": name.strip()},
+        access_token=access_token,
+    )
+    return [_candidate_from_user(row) for row in rows]
+
+
+def find_friend_candidate_by_public_user_id(public_user_id: str, access_token: str) -> FriendCandidate | None:
+    rows = _request(
+        "POST",
+        "rpc/find_friend_candidate_by_public_user_id",
+        {"search_public_user_id": public_user_id.strip()},
+        access_token=access_token,
     )
     if not rows:
         return None
 
-    row = rows[0]
-    if int(row["id"]) == owner_user_id:
-        return None
-
-    return _candidate_from_user(row)
+    return _candidate_from_user(rows[0])
 
 
-def create_friend(payload: FriendCreate, owner_user_id: int) -> Friend:
+def create_friend(payload: FriendCreate, access_token: str, owner_user_id: int) -> Friend:
     friend_user = None
 
     if payload.user_db_id is not None:
-      user_rows = _request("GET", f"User?select=id,name,user_id,note,icon_url&id=eq.{payload.user_db_id}&limit=1")
+      user_rows = _request("POST", "rpc/find_friend_candidate_by_db_id", {"search_user_db_id": payload.user_db_id}, access_token=access_token)
       friend_user = user_rows[0] if user_rows else None
     elif payload.public_user_id:
-      candidate = find_friend_candidate_by_public_user_id(payload.public_user_id, owner_user_id)
+      candidate = find_friend_candidate_by_public_user_id(payload.public_user_id, access_token)
       friend_user = {
           "id": candidate.id,
           "name": candidate.name,
@@ -154,7 +132,7 @@ def create_friend(payload: FriendCreate, owner_user_id: int) -> Friend:
           "note": candidate.note,
       } if candidate else None
     elif payload.name:
-      candidates = search_friend_candidates(payload.name, owner_user_id)
+      candidates = search_friend_candidates(payload.name, access_token)
       if candidates:
           friend_user = {
               "id": candidates[0].id,
@@ -170,26 +148,31 @@ def create_friend(payload: FriendCreate, owner_user_id: int) -> Friend:
     if int(friend_user["id"]) == owner_user_id:
         raise SupabaseRequestError(400, "You cannot add yourself")
 
-    if _relation_exists(owner_user_id, int(friend_user["id"])):
+    if _relation_exists(owner_user_id, int(friend_user["id"]), access_token):
         raise SupabaseRequestError(409, "Friend already added")
 
-    relation_rows = _create_relation_if_missing(owner_user_id, int(friend_user["id"]))
-    _create_relation_if_missing(int(friend_user["id"]), owner_user_id)
+    relation_rows = _request(
+        "POST",
+        "rpc/create_friend_pair",
+        {"target_friend_user_id": int(friend_user["id"])},
+        access_token=access_token,
+    )
 
     return _friend_from_relation(relation_rows[0], {int(friend_user["id"]): friend_user})
 
 
-def delete_friend(friend_id: int, owner_user_id: int) -> Friend | None:
+def delete_friend(friend_id: int, access_token: str, owner_user_id: int) -> Friend | None:
     relations = _request(
         "GET",
         f"Friend?select=id,owner_user_id,friend_user_id,created_at,updated_at&id=eq.{friend_id}&owner_user_id=eq.{owner_user_id}&limit=1",
+        access_token=access_token,
     )
 
     if not relations:
         return None
 
     relation = relations[0]
-    users_by_id = _get_users_by_ids([int(relation["friend_user_id"])])
+    users_by_id = _get_users_by_ids([int(relation["friend_user_id"])], access_token)
     friend = _friend_from_relation(relation, users_by_id)
-    _request("DELETE", f"Friend?id=eq.{friend_id}&owner_user_id=eq.{owner_user_id}")
+    _request("DELETE", f"Friend?id=eq.{friend_id}&owner_user_id=eq.{owner_user_id}", access_token=access_token)
     return friend
