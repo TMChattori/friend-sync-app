@@ -1,6 +1,7 @@
 export type AuthSession = {
   email: string;
   accessToken: string | null;
+  emailConfirmed?: boolean;
   authUserId?: string | null;
   dbUserId?: number | null;
   username?: string | null;
@@ -25,6 +26,7 @@ export function mergeAuthSession(current: AuthSession | null, next: AuthSession)
 export function hasAuthSessionChanged(current: AuthSession, next: AuthSession) {
   return (
     current.email !== next.email ||
+    current.emailConfirmed !== next.emailConfirmed ||
     current.username !== next.username ||
     current.publicUserId !== next.publicUserId ||
     current.note !== next.note ||

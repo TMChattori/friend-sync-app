@@ -76,8 +76,12 @@ export function RegistrationScreenContent() {
       const session = await loginWithEmail(email.trim(), password);
       enterApp(session);
     } catch (error) {
-      const message =
+      const rawMessage =
         error instanceof Error ? error.message : 'メールアドレスまたはパスワードを確認してください。';
+      const message =
+        rawMessage.toLowerCase().includes('email not confirmed')
+          ? '確認メールの認証がまだ完了していません。メール内のリンクを開いてからログインしてください。'
+          : rawMessage;
       setAuthError(message);
       Alert.alert(
         'ログインできませんでした',
@@ -120,11 +124,11 @@ export function RegistrationScreenContent() {
       const session = await registerWithEmail(username.trim(), email.trim(), password);
 
       if (!session.accessToken) {
-        setAuthError('登録は完了しましたが、まだログイン可能な状態ではありません。メール確認設定を確認するか、少し待ってからログインしてください。');
+        setAuthError('確認メールを送りました。メール内のリンクで認証してからログインしてください。');
         setAuthMode('login');
         Alert.alert(
           '登録は完了しました',
-          'ログイントークンがまだ取得できなかったため、すぐにはホームへ進めませんでした。メール確認設定を確認するか、少し待ってからログインしてください。'
+          '確認メールを送りました。メール内のリンクで認証してからログインしてください。'
         );
         return;
       }
@@ -273,7 +277,7 @@ export function RegistrationScreenContent() {
             {authError ? <Text style={styles.errorText}>{authError}</Text> : null}
 
             <AppButton
-              label={isSubmitting ? '通信中...' : isRegisterMode ? '登録してはじめる' : 'ログイン'}
+              label={isSubmitting ? '通信中...' : isRegisterMode ? '確認メールを送って登録' : 'ログイン'}
               onPress={isRegisterMode ? handleRegister : handleLogin}
               disabled={isSubmitting || (isRegisterMode && !agreedToPrivacy)}
             />

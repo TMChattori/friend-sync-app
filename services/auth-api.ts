@@ -4,6 +4,7 @@ import { type AuthSession } from '@/services/auth-session';
 type ApiAuthSession = {
   email: string;
   access_token?: string | null;
+  email_confirmed?: boolean;
   auth_user_id?: string | null;
   db_user_id?: number | null;
   username?: string | null;
@@ -17,6 +18,7 @@ function mapSession(session: ApiAuthSession): AuthSession {
   return {
     email: session.email,
     accessToken: session.access_token ?? null,
+    emailConfirmed: session.email_confirmed ?? false,
     authUserId: session.auth_user_id ?? null,
     dbUserId: session.db_user_id ?? null,
     username: session.username ?? null,

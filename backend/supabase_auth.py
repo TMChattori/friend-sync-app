@@ -227,10 +227,15 @@ def _session_from_response(
     user = data.get("user") if isinstance(data.get("user"), dict) else data
     email = user.get("email") if isinstance(user, dict) else None
     auth_user_id = user.get("id") if isinstance(user, dict) else None
+    email_confirmed = False
+
+    if isinstance(user, dict):
+        email_confirmed = bool(user.get("email_confirmed_at") or user.get("confirmed_at"))
 
     return AuthSession(
         email=email or fallback_email,
         access_token=data.get("access_token") or fallback_token,
+        email_confirmed=email_confirmed,
         auth_user_id=auth_user_id or (app_user.get("auth_user_id") if app_user else None),
         db_user_id=int(app_user["id"]) if app_user and app_user.get("id") is not None else None,
         username=app_user.get("name") if app_user else None,
@@ -392,18 +397,17 @@ def register_user(payload: AuthCredentials) -> AuthSession:
     auth_user = data.get("user") if isinstance(data.get("user"), dict) else None
     auth_user_id = str(auth_user["id"]) if isinstance(auth_user, dict) and auth_user.get("id") else None
     if not auth_user_id:
-        raise SupabaseRequestError(500, "Supabase auth user id is missing from signup response")
+        # With email confirmation enabled, Supabase can return an obfuscated
+        # signup response for an already-registered address. In that case,
+        # avoid surfacing a server error and return a pending session shape.
+        return AuthSession(
+            email=payload.email,
+            access_token=None,
+            email_confirmed=False,
+        )
 
     app_user = ensure_app_user(auth_user_id, payload.email, payload.username)
-    session = _session_from_response(data, payload.email, app_user=app_user)
-
-    if session.access_token:
-        return session
-
-    try:
-        return login_user(payload)
-    except SupabaseRequestError:
-        return session
+    return _session_from_response(data, payload.email, app_user=app_user)
 
 
 def login_user(payload: AuthCredentials) -> AuthSession:
