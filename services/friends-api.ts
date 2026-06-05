@@ -60,7 +60,13 @@ export function fetchFriendCandidateByPublicUserId(publicUserId: string, session
 
 export function fetchAvailableFriends(date: string, session: AuthSession | null) {
   const query = encodeURIComponent(date);
-  return requestJson<ApiFriend[]>(`/available-friends?date=${query}`, { headers: buildAuthHeaders(session) });
+  return requestJson<ApiFriend[]>(`/available-friends?date=${query}`, { headers: buildAuthHeaders(session) }).catch(async (error) => {
+    if (error instanceof Error && error.message === 'Not Found') {
+      return fetchFriends(session);
+    }
+
+    throw error;
+  });
 }
 
 export function deleteFriend(friendId: number, session: AuthSession | null) {

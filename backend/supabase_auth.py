@@ -5,7 +5,7 @@ from uuid import uuid4
 import certifi
 import httpx
 
-from config import SUPABASE_STORAGE_BUCKET, SUPABASE_URL, get_admin_key, get_auth_key
+from config import SUPABASE_EMAIL_REDIRECT_TO, SUPABASE_STORAGE_BUCKET, SUPABASE_URL, get_admin_key, get_auth_key
 from schemas import AuthCredentials, AuthProfileUpdate, AuthSession, AuthUpdate, PasswordResetRequest
 from supabase_events import SupabaseConfigError, SupabaseRequestError
 
@@ -386,13 +386,17 @@ def update_app_user_profile(access_token: str, current_email: str, payload: Auth
 
 
 def register_user(payload: AuthCredentials) -> AuthSession:
+    request_payload = {
+        "email": payload.email,
+        "password": payload.password,
+    }
+    if SUPABASE_EMAIL_REDIRECT_TO:
+        request_payload["email_redirect_to"] = SUPABASE_EMAIL_REDIRECT_TO
+
     data = _request(
         "POST",
         "signup",
-        {
-            "email": payload.email,
-            "password": payload.password,
-        },
+        request_payload,
     )
     auth_user = data.get("user") if isinstance(data.get("user"), dict) else None
     auth_user_id = str(auth_user["id"]) if isinstance(auth_user, dict) and auth_user.get("id") else None
@@ -449,12 +453,16 @@ def update_user(access_token: str, payload: AuthUpdate, current_email: str) -> A
 
 
 def send_password_reset_email(payload: PasswordResetRequest) -> None:
+    request_payload = {
+        "email": payload.email,
+    }
+    if SUPABASE_EMAIL_REDIRECT_TO:
+        request_payload["redirect_to"] = SUPABASE_EMAIL_REDIRECT_TO
+
     _request(
         "POST",
         "recover",
-        {
-            "email": payload.email,
-        },
+        request_payload,
     )
 
 

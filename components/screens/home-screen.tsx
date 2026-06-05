@@ -121,23 +121,53 @@ export function HomeScreenContent() {
     try {
       setIsLoading(!(cachedFriends?.length || cachedEvents?.length));
       setIsRefreshing(!!(cachedFriends?.length || cachedEvents?.length));
-      const [apiFriends, sentInvites] = await Promise.all([
+      const [friendsResult, invitesResult] = await Promise.allSettled([
         fetchAvailableFriends(selectedDate, authSession),
         fetchSentInvites(authSession),
       ]);
-      setFriends(apiFriends);
-      setInvitedKeys(sentInvites.map((invite) => `${invite.date}:${invite.to_user_id}`));
-      setLoadError(null);
-      setIsShowingCachedData(false);
-      await Promise.all([
-        writeCachedJson(`available-friends-${selectedDate}`, dataCacheScope, apiFriends),
-        writeCachedJson('sent-invites', dataCacheScope, sentInvites.map((invite) => `${invite.date}:${invite.to_user_id}`)),
-      ]);
-    } catch {
+
+      const friendFetchSucceeded = friendsResult.status === 'fulfilled';
+      const inviteFetchSucceeded = invitesResult.status === 'fulfilled';
+
+      if (friendFetchSucceeded) {
+        const apiFriends = friendsResult.value;
+        setFriends(apiFriends);
+        await writeCachedJson(`available-friends-${selectedDate}`, dataCacheScope, apiFriends);
+      }
+
+      if (inviteFetchSucceeded) {
+        const inviteKeys = invitesResult.value.map((invite) => `${invite.date}:${invite.to_user_id}`);
+        setInvitedKeys(inviteKeys);
+        await writeCachedJson('sent-invites', dataCacheScope, inviteKeys);
+      } else if (!cachedEvents?.length) {
+        setInvitedKeys([]);
+      }
+
+      if (friendFetchSucceeded) {
+        setLoadError(
+          inviteFetchSucceeded
+            ? null
+            : '友達一覧は表示できましたが、お誘い状態の取得に失敗しました。'
+        );
+        setIsShowingCachedData(false);
+      } else {
+        const friendError =
+          friendsResult.status === 'rejected' && friendsResult.reason instanceof Error
+            ? friendsResult.reason.message
+            : null;
+
+        setLoadError(
+          cachedFriends?.length || cachedEvents?.length
+            ? '前回の一覧を表示しています。最新情報の取得に失敗しました。'
+            : `ホーム画面のデータを取得できませんでした。${friendError ?? 'サーバー接続を確認してください。'}`
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'サーバー接続を確認してください。';
       setLoadError(
         cachedFriends?.length || cachedEvents?.length
           ? '前回の一覧を表示しています。最新情報の取得に失敗しました。'
-          : 'ホーム画面のデータを取得できませんでした。サーバー接続を確認してください。'
+          : `ホーム画面のデータを取得できませんでした。${message}`
       );
     } finally {
       setIsLoading(false);
