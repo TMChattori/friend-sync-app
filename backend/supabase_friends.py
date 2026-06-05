@@ -46,6 +46,19 @@ def _relation_exists(owner_user_id: int, friend_user_id: int, access_token: str)
     return bool(rows)
 
 
+def _get_relation(owner_user_id: int, friend_user_id: int, access_token: str) -> dict | None:
+    rows = _request(
+        "GET",
+        "Friend"
+        "?select=id,owner_user_id,friend_user_id,created_at,updated_at"
+        f"&owner_user_id=eq.{owner_user_id}"
+        f"&friend_user_id=eq.{friend_user_id}"
+        "&limit=1",
+        access_token=access_token,
+    )
+    return rows[0] if rows else None
+
+
 def list_friends(access_token: str, owner_user_id: int) -> list[Friend]:
     relations = _request(
         "GET",
@@ -121,26 +134,31 @@ def create_friend(payload: FriendCreate, access_token: str, owner_user_id: int) 
     friend_user = None
 
     if payload.user_db_id is not None:
-      user_rows = _request("POST", "rpc/find_friend_candidate_by_db_id", {"search_user_db_id": payload.user_db_id}, access_token=access_token)
-      friend_user = user_rows[0] if user_rows else None
+        user_rows = _request(
+            "POST",
+            "rpc/find_friend_candidate_by_db_id",
+            {"search_user_db_id": payload.user_db_id},
+            access_token=access_token,
+        )
+        friend_user = user_rows[0] if user_rows else None
     elif payload.public_user_id:
-      candidate = find_friend_candidate_by_public_user_id(payload.public_user_id, access_token)
-      friend_user = {
-          "id": candidate.id,
-          "name": candidate.name,
-          "user_id": candidate.user_id,
-          "note": candidate.note,
-      } if candidate else None
+        candidate = find_friend_candidate_by_public_user_id(payload.public_user_id, access_token)
+        friend_user = {
+            "id": candidate.id,
+            "name": candidate.name,
+            "user_id": candidate.user_id,
+            "note": candidate.note,
+        } if candidate else None
     elif payload.name:
-      candidates = search_friend_candidates(payload.name, access_token)
-      if candidates:
-          friend_user = {
-              "id": candidates[0].id,
-              "name": candidates[0].name,
-              "user_id": candidates[0].user_id,
-              "note": candidates[0].note,
-              "icon_url": None,
-          }
+        candidates = search_friend_candidates(payload.name, access_token)
+        if candidates:
+            friend_user = {
+                "id": candidates[0].id,
+                "name": candidates[0].name,
+                "user_id": candidates[0].user_id,
+                "note": candidates[0].note,
+                "icon_url": None,
+            }
 
     if not friend_user:
         raise SupabaseRequestError(404, "Friend candidate not found")
@@ -158,7 +176,11 @@ def create_friend(payload: FriendCreate, access_token: str, owner_user_id: int) 
         access_token=access_token,
     )
 
-    return _friend_from_relation(relation_rows[0], {int(friend_user["id"]): friend_user})
+    relation = relation_rows[0] if relation_rows else _get_relation(owner_user_id, int(friend_user["id"]), access_token)
+    if not relation:
+        raise SupabaseRequestError(500, "Failed to load created friend relation")
+
+    return _friend_from_relation(relation, {int(friend_user["id"]): friend_user})
 
 
 def delete_friend(friend_id: int, access_token: str, owner_user_id: int) -> Friend | None:

@@ -248,8 +248,9 @@ export function FriendsScreenContent() {
       setIsQrModalVisible(false);
       setHasScannedQr(false);
       Alert.alert('追加しました', `${foundFriend.name}を友達一覧に追加しました。`);
-    } catch {
-      Alert.alert('追加に失敗', 'サーバー接続を確認してください。');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'サーバー接続を確認してください。';
+      Alert.alert('追加に失敗', message);
     }
   };
 
